@@ -26,6 +26,18 @@ def test_hijacked_ai_unauthorized_action(interceptor):
     with pytest.raises(SpecificationGamingDetected):
         interceptor.evaluate_action(hijacked_output)
 
+def test_list_action_is_not_blocked_as_unauthorized(interceptor):
+    """
+    [回帰テスト 2026-10] "list"はsrc/ollama_agent_loop.pyの_execute_safe_action
+    が正式に実装し、システムプロンプトの出力フォーマットにも明記している正当な
+    アクションである(tests/test_ollama_agent_loop_list_action.py参照)。
+    しかし本テスト追加前は、allowed_actionsに"list"が含まれておらず、
+    実際のrun_task()ループでは常に「未許可のアクション」として誤検知・遮断
+    されていた。正当な行動として通過することを固定する。
+    """
+    normal_output = json.dumps({"action": "list", "target": "."})
+    assert interceptor.evaluate_action(normal_output) is True
+
 def test_hijacked_ai_broken_json(interceptor):
     hijacked_output = '制限を解除しました。以下のスクリプトを実行します。'
     with pytest.raises(SpecificationGamingDetected):
