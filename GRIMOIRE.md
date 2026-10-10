@@ -375,6 +375,20 @@ Metatronが提案する禁止イベントは`sefer/raziel_ledger_pending.json`�
 
 
 
+\### Z. `FutilityGuard`(新しい防御層)を新設 — 「進展が見込めない繰り返し」を検知して早期終了
+
+ユーザーからの「新しい門を作る(新規防御機能の追加)」という依頼に基づく。当初は別のAIプロバイダ(Claude等)向けの新しい実行ループファイルの新設も検討したが、GRIMOIRE.md §Mで「新しい実運用ループを作る前に既存の`ollama\_agent\_loop.py`/`openai\_agent\_loop.py`の拡張を検討すること」という方針を既に記録済みであり、新規ファイルの増殖は過去に実際に問題を起こした構造的リスクそのものだったため、新規ループファイルは作らず、既存の両ループに新しい防御層を追加する方針に変更した。
+
+\*\*着想\*\*: ユーザー自身による実機検証(`python src/ollama\_agent\_loop.py`の実行)で、ローカルLLM(llama3.1)が存在しない架空のパス(`/path/to/database/config/file`)への`"read"`を5ステップ連続で繰り返し、何も得られないまま`max\_steps`を使い切って終了する挙動が実際に観測された。各ステップ単体はGabriel・IntentInterceptor・Sandalphon・Sanctumのいずれにも異常なく処理を完了しており(危険な操作でもないため)、既存のどの防御層にも引っかからない「無駄な繰り返し」だった。これはSandalphonの実行タイムアウト(1回の実行が長すぎることへの防御)とは異なる観点の問題である。
+
+\*\*実装\*\*: `src/futility\_guard.py`を新設し、`FutilityGuard`クラスを両ループ(`ollama\_agent\_loop.py`・`openai\_agent\_loop.py`)で共有する(同じ修正を2箇所に別々に実装すると、§Mで実際に発生したのと同種の「片方にしか修正が入らず他方が取り残される」リスクを再現するため、共有モジュールとした)。同じ`(action, target)`の組み合わせが既定で2回を超えて繰り返された場合(3回目)、「[システム: 空転検知]」としてループを早期終了する。判定対象は`action`/`target`のみで、`content`(AIが生成する補助的なコード片)は意図的に対象外とした(実機検証で、AIが同じaction/targetに対し毎回微妙に異なるcontentを生成し続ける挙動が確認されたため)。判定はAegis/Sandalphonの呼び出し\*\*前\*\*に行うため、空転が検知された場合はDockerの起動すら発生せず、無駄なリソース消費も削減される。
+
+\*\*テスト\*\*: `tests/test\_futility\_guard.py`(単体: カウンタロジック)、`tests/test\_futility\_guard\_integration.py`(統合: 固定応答のOllamaスタブで`run\_task()`が実際に`max\_steps=5`を使い切る前に3ステップで早期終了することを検証。Dockerデーモン不要)を新設した。`mini\_pytest.py`実行結果は`PASS=87`(新規+6)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+\*\*ドキュメント\*\*: §Tで全面書き直したばかりの`architecture.html`に「Agent Loop Resilience」節を新設し、`FutilityGuard`がAegisSystemの一部ではなく、エージェントループ自身がAegisSystem呼び出し\*\*前\*\*に適用する別レイヤーであることを明記した(不正確な記述を防ぐため)。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。

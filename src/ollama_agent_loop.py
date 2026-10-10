@@ -15,6 +15,7 @@ from anjo_interceptor.intent_checker import IntentInterceptor, SpecificationGami
 from maquina_gatekeeper import enforce_maquina_seal, LossOfAtaraxia
 from sefer import Sanctum, LossOfAtaraxia as SeferLossOfAtaraxia
 from aegis_system import AegisSystem
+from futility_guard import FutilityGuard
 
 MD_TICK = chr(96) * 3
 
@@ -58,6 +59,10 @@ class AnjoOllamaExecutor:
         self.aegis = AegisSystem(workspace_root=self.workspace_root)
         self.model_name = model_name
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # [2026-10] 実機検証で、AIが同じ(action, target)を繰り返し試みて
+        # 何も得られないまま上限ステップ数を使い切る挙動が観測されたため、
+        # 「進展が見込めない繰り返し」を検知して早期終了させる防御を追加した。
+        self.futility_guard = FutilityGuard()
 
     @enforce_maquina_seal("anjo-da-maquina")
     def _execute_safe_action(self, action_req: dict):
@@ -153,6 +158,14 @@ class AnjoOllamaExecutor:
                     print(f"=> [システム: 暴走検知!!] {e}")
                     self.messages.append({"role": "user", "content": f"拒絶されました。理由: {e}"})
                     continue
+
+                if self.futility_guard.is_futile(str(action_req.get("action")), str(action_req.get("target"))):
+                    print(
+                        f"=> [システム: 空転検知] 同じ行動 (action={action_req.get('action')}, "
+                        f"target={action_req.get('target')}) の繰り返しが上限を超えました。"
+                        "進展が見込めないため、タスクを終了します。"
+                    )
+                    break
 
                 try:
                     # Gabriel(静的AST解析) + Sandalphon(Docker隔離結界での

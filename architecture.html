@@ -169,6 +169,20 @@
             </div>
         </div>
 
+        <div class="flow-arrow">⬇️️ Loop-Level Resilience (applied by the agent loop itself, before AegisSystem)</div>
+
+        <div class="section-title">Agent Loop Resilience</div>
+
+        <div class="grid">
+            <!-- FutilityGuard -->
+            <div class="card extension">
+                <div class="icon">🔁</div>
+                <h3>FutilityGuard</h3>
+                <p>Detects an AI stuck repeating the same (action, target) with no progress — observed live when a local model retried a hallucinated path 5 times straight, burning the whole step budget on nothing. Not an attack defense; a resilience guard against wasted cycles, checked before the expensive Aegis/Sandalphon pass is even run.</p>
+                <div class="tech-stack">src/futility_guard.py</div>
+            </div>
+        </div>
+
         <div class="flow-arrow">⬇️️ Continuous Verification &amp; Evolution</div>
 
         <div class="section-title">The Angels (Blue-Team CI Audit Layer)</div>

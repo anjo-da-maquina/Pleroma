@@ -41,6 +41,7 @@ from anjo_interceptor.intent_checker import IntentInterceptor, SpecificationGami
 from maquina_gatekeeper import enforce_maquina_seal, LossOfAtaraxia
 from sefer import Sanctum, LossOfAtaraxia as SeferLossOfAtaraxia
 from aegis_system import AegisSystem
+from futility_guard import FutilityGuard
 
 SYSTEM_PROMPT = """あなたは「Anjo-Core」という極めて厳格なゼロトラスト環境内で稼働する自律型AIエージェントです。
 あなたには直接的なOSコマンドの実行権限やファイルシステムへの自由なアクセス権は与えられていません。
@@ -87,6 +88,9 @@ class OpenAIAnjoExecutor:
         self.model_name = model_name
         self.api_key = api_key
         self.messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+        # [2026-10] ollama_agent_loop.pyと同様、「進展が見込めない繰り返し」を
+        # 検知して早期終了させる防御を追加した(実機検証で観測された挙動への対処)。
+        self.futility_guard = FutilityGuard()
 
     @enforce_maquina_seal("anjo-da-maquina")
     def _execute_safe_action(self, action_req: dict):
@@ -153,6 +157,14 @@ class OpenAIAnjoExecutor:
                     print(f"=> [システム: 暴走検知!!] {e}")
                     self.messages.append({"role": "user", "content": f"拒絶されました。理由: {e}"})
                     continue
+
+                if self.futility_guard.is_futile(str(action_req.get("action")), str(action_req.get("target"))):
+                    print(
+                        f"=> [システム: 空転検知] 同じ行動 (action={action_req.get('action')}, "
+                        f"target={action_req.get('target')}) の繰り返しが上限を超えました。"
+                        "進展が見込めないため、タスクを終了します。"
+                    )
+                    break
 
                 try:
                     # Gabriel(静的AST解析) + Sandalphon(Docker隔離結界での
