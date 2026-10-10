@@ -123,8 +123,20 @@ def _is_path_allowed(target_path, allowed_dirs) -> bool:
                     return True
             except ValueError:
                 pass
-            t_str = str(target).lower().replace("\\", "/")
-            d_str = str(resolved_d).lower().replace("\\", "/")
+            # [脆弱性修正 2026-10] 以前はこのフォールバック文字列比較で
+            # .lower() により大文字小文字を無視して比較していたため、
+            # allowed_dirsと大文字小文字が異なるだけの「別の実ディレクトリ」
+            # (例: allowed_dirs=["jail_workspace"]に対し実際に存在する
+            # "JAIL_WORKSPACE"という完全に別のディレクトリ)への書き込み・
+            # 破壊的操作が許可されてしまう脆弱性があった(Linux等の大文字
+            # 小文字を区別するファイルシステムで実機検証済み: Sanctum配下で
+            # allowed_dirs外の"JAIL_WORKSPACE_repro"ディレクトリへの書き込み
+            # がブロックされずに通過することを確認)。本来この文字列比較は
+            # パス区切り文字(バックスラッシュ→スラッシュ)の正規化のみを
+            # 目的としており、大文字小文字の無視は意図した挙動ではない。
+            # 大文字小文字は元の文字列のまま厳密に比較するよう修正した。
+            t_str = str(target).replace("\\", "/")
+            d_str = str(resolved_d).replace("\\", "/")
             if t_str == d_str or t_str.startswith(d_str + "/"):
                 return True
         return False
