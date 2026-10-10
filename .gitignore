@@ -6,11 +6,19 @@ dist/
 build/
 *.egg-info/
 raziel_ledger_pending.json
+shield_rules_pending.json
+provisioning_pending.json
 .angel_state/
 incident_report.json
 sanctuary_manifest.json
 zk_audit_trail.json
 zk_audit_report.xml
+# [2026-10] Michael(sefer._log_violation_to_chain)が実際に遮断したイベントを
+# 都度追記する、実行時生成の監査ログ。zk_audit_trail.json等の他の監査ログと
+# 同種の「テスト実行で汚染される」ファイルであるにもかかわらずこれまで
+# .gitignoreの対象外になっており、Git管理対象として誤って追跡されていた
+# (GRIMOIRE.md §X参照)。
+sefer/audit_chain.jsonl
 remote_ledger_sync.log
 vital_feed.sig
 fake_admin_credentials.py
