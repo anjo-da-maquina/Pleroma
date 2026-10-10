@@ -345,6 +345,18 @@ Metatronが提案する禁止イベントは`sefer/raziel_ledger_pending.json`�
 
 
 
+\### X. `sefer/audit\_chain.jsonl`(Michaelの実監査ログ)が`.gitignore`対象外でGit管理されていた不備を修正
+
+可視化ダッシュボードの作成に着手する前段として、データ元となるファイル群を点検した際に発見した。§Qで`zk\_audit\_report.xml`について見つけたのと同種の見落としが、別のファイルにも残っていた。
+
+\*\*事実確認\*\*: `sefer/audit\_chain.jsonl`は、`sefer.\_log\_violation\_to\_chain()`(Michaelが実際にイベントを遮断した際に呼ばれる)が都度追記する、ハッシュ連鎖による改ざん検知付きの実監査ログである。`zk\_audit\_trail.json`(`maquina\_gatekeeper.ZKAuditTrail`が書き込む、同種の実行時生成ログ)は`.gitignore`で正しく除外されていたが、`sefer/audit\_chain.jsonl`は除外対象になっておらずGit管理下に置かれていた。Sanctumの遮断挙動を検証する大半のテスト(`test\_sanctuary.py`・`test\_sandbox.py`等)が実際に遮断イベントを発生させるため、`mini\_pytest.py`を実行するたびに本ファイルが汚染され、これまで毎回`git checkout --`で手動で元に戻す必要があった。
+
+\*\*修正\*\*: `.gitignore`に`sefer/audit\_chain.jsonl`を追加し、`git rm --cached`でGit管理のみ外した(ローカルファイルは残置)。あわせて、同じ「人間承認待ちキュー」のパターンに属する`shield\_rules\_pending.json`・`provisioning\_pending.json`(既に`raziel\_ledger\_pending.json`は対象だったが、この2つが対象外のまま漏れていた)も`.gitignore`に追加し、将来`git add -A`等で誤ってコミットされる事故を未然に防いだ(現時点ではまだGit管理下に入っていないため実害は無かったが、再発防止の予防的修正)。
+
+ドキュメントのみ・Git管理設定のみの変更のため、`mini\_pytest.py`実行結果は変更前と同一の`PASS=79 XFAIL=2 FAIL=0 ERROR=2`であることを確認した。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。
