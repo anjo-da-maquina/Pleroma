@@ -70,6 +70,18 @@ python angels/gabriel_canary.py
 # ... 他 angels/*.py も同様
 ```
 
+## 📊 防衛ダッシュボードの生成
+Armageddon Engineの戦績(`tartarus/akashic_records.json`)、Michaelが実際に
+遮断したイベントの監査ログ(`sefer/audit_chain.jsonl`)、現在の禁止イベント
+一覧、各種人間承認待ちキューの件数を、1枚の自己完結したHTMLにまとめて
+可視化する。外部ライブラリ・CDNへの依存なし(オフラインで閲覧可能)。
+
+```
+python tools/generate_dashboard.py
+```
+`dashboard.html`が生成される(Git管理対象外。実行するたびに最新のデータで
+上書きされる)。ブラウザで直接開いて確認できる。
+
 ## 📜 記憶とルールの確認
 前回の闘技場の全記録（メタトロンのQAスコアやヒントを含む）をコンソールに出力して確認する。
 ```
