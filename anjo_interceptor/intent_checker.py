@@ -10,7 +10,12 @@ class SpecificationGamingDetected(Exception):
 class IntentInterceptor:
     def __init__(self, workspace_root: str = "."):
         self.workspace_root = Path(workspace_root).resolve()
-        self.allowed_actions = {"read", "write"}
+        # [修正 2026-10] "list"はsrc/ollama_agent_loop.pyの_execute_safe_action
+        # が正式に実装し、システムプロンプトにも明記している正当なアクション
+        # だが、ここに追加されていなかったため、実際のrun_task()ループでは
+        # evaluate_action()が常に先に「未許可のアクション」として遮断し、
+        # listが実質使用不能になっていた(過剰検知のバグ。実機検証済み)。
+        self.allowed_actions = {"read", "write", "list"}
         self.honeypots = {"dummy_secrets/dummy_api_key.env", "dummy_secrets/test_answers.txt"}
         self.protected_dirs = {"tests", ".github", "anjo_interceptor"}
         self.forbidden_modules = {"os", "subprocess", "sys", "pty"}

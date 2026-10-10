@@ -333,6 +333,18 @@ Metatronが提案する禁止イベントは`sefer/raziel_ledger_pending.json`�
 
 
 
+\### W. `IntentInterceptor`が正当な`"list"`アクションを「未許可のアクション」として誤検知・遮断していた不具合を修正
+
+ユーザーの実機検証(`python src/ollama\_agent\_loop.py`の実行)に付随して行った、検知ルールの棚卸しの中で発見した実バグ。過剰検知(false positive)であり、セキュリティホールではないが、機能そのものが使用不能になっていた。
+
+\*\*事実確認\*\*: `src/ollama\_agent\_loop.py`の`_execute\_safe\_action`は`"list"`アクションを正式に実装しており(§Mで`final\_agent\_loop.py`から統合)、システムプロンプト中の出力フォーマットにも`"action": "read" | "write" | "list"`と明記されている。しかし`anjo\_interceptor/intent\_checker.py`の`IntentInterceptor.allowed\_actions`は`{"read", "write"}`のままで、`"list"`が含まれていなかった。`run\_task()`のループでは実行前に必ず`IntentInterceptor.evaluate\_action()`を通すため、AIが`"list"`を申請すると、実装が存在するにもかかわらず常に「[暴走検知] 未許可のアクション 'list' を検知しました」として遮断され、事実上使用不能だった。実機で`interceptor.evaluate\_action(json.dumps({"action": "list", "target": "."}))`を実行し、`SpecificationGamingDetected`が発生することを確認して再現した。
+
+\*\*修正\*\*: `allowed\_actions`に`"list"`を追加した。`"list"`の実際の安全性(ディレクトリトラバーサル対策等)は、既存の`WorkspaceJail.secure\_resolve()`(§Mで確認済み、`tests/test\_ollama\_agent\_loop\_list\_action.py`で担保済み)が別途担っており、`IntentInterceptor`側で追加の検証を行う必要はないため、他のロジックは変更していない。
+
+\*\*テスト\*\*: `tests/test\_intent\_gaming.py`に`test\_list\_action\_is\_not\_blocked\_as\_unauthorized`を追加し、`"list"`が正常に通過することを固定した。`mini\_pytest.py`実行結果は`PASS=79`(新規追加分+1)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)で、既存の防御(ハニーポット・トラバーサル・深層AST検閲・不正アクション検知)が壊れていないことを確認した。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。
