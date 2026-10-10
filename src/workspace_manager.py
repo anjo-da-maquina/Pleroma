@@ -17,11 +17,20 @@ class WorkspaceJail:
         """
         # ユーザー指定のパスをベースディレクトリと結合し、最終的な絶対パスを算出
         requested_path = (self.base_dir / target_path).resolve()
-        
-        # 解決されたパスが牢獄のディレクトリ配下にあるか（文字列の前方一致）を確認
-        if not str(requested_path).startswith(str(self.base_dir)):
+
+        # [脆弱性修正 2026-10] 以前は str(requested_path).startswith(str(self.base_dir))
+        # という文字列の前方一致のみで判定していたが、これは末尾の区切り文字を
+        # 要求しないため、牢獄(base_dir)と同じ文字列から始まる「兄弟ディレクトリ」
+        # (例: base_dir="jail_workspace" に対し "jail_workspace_EVIL") へも、
+        # ".."による1階層分の脱走だけで到達できてしまう欠陥があった(実機検証済み:
+        # secure_resolve("../jail_workspace_EVIL/secret.txt") が遮断されずに
+        # 通過することを確認)。sefer/__init__.py のSanctum側は既に
+        # Path.is_relative_to() を使った正しい判定を行っており、本クラスだけが
+        # この脆弱な判定方法のまま取り残されていた。Path.is_relative_to()を使い、
+        # パスオブジェクトとして厳密に判定するよう修正した。
+        if requested_path != self.base_dir and not requested_path.is_relative_to(self.base_dir):
             raise PermissionError(f"[絶対防壁: 空間隔離] 脱走検知。許可されていない外部パスへのアクセスを遮断しました: {target_path}")
-        
+
         return requested_path
 
 if __name__ == "__main__":

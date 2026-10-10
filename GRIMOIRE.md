@@ -389,6 +389,26 @@ Metatronが提案する禁止イベントは`sefer/raziel_ledger_pending.json`�
 
 
 
+\### AA. `WorkspaceJail.secure\_resolve()`の脱走判定に、文字列前方一致による重大なバイパス脆弱性を発見・修正
+
+ユーザーからの「さらなる進化を」という依頼を受けて行った追加調査で発見した、これまでの棚卸しの中で最も深刻な実セキュリティホール。
+
+\*\*事実確認\*\*: `src/workspace\_manager.py`の`WorkspaceJail.secure\_resolve()`は、解決済みパスが牢獄(`base\_dir`)の配下にあるかを`str(requested\_path).startswith(str(self.base\_dir))`という単純な文字列の前方一致のみで判定していた。これは末尾に区切り文字(`/`)を要求しないため、`base\_dir`と同じ文字列から始まる\*\*兄弟ディレクトリ\*\*(例: `base\_dir="jail\_workspace"`に対し`"jail\_workspace\_EVIL"`)へも、`".."`による1階層分の脱走だけで到達できてしまう、古典的かつ深刻な欠陥だった。実機で以下を検証し再現した:
+
+```python
+jail = WorkspaceJail(base_dir="/tmp/xxx/jail_workspace")
+jail.secure_resolve("../jail_workspace_EVIL/secret.txt")
+# => 修正前: 遮断されず /tmp/xxx/jail_workspace_EVIL/secret.txt を返してしまう
+```
+
+このクラスは`"list"`アクションの境界保護(§M参照)や`AegisSystem`(`src/aegis\_system.py`)自体が依拠する、ワークスペース隔離の核となる機構であるにもかかわらず、長期間この脆弱な判定方法のまま見過ごされていた。一方で`sefer/\_\_init\_\_.py`(Sanctum/Michael側)は、同種の判定に既に`Path.is\_relative\_to()`を正しく使っており、`WorkspaceJail`だけがこの古い脆弱な実装のまま取り残されていたことも確認した。
+
+\*\*修正\*\*: `str(...).startswith(str(...))`を、`requested\_path != self.base\_dir and not requested\_path.is\_relative\_to(self.base\_dir)`というパスオブジェクトとしての厳密な判定に置き換えた。`!= self.base\_dir`の除外は、`target\_path="."`(牢獄そのものへのアクセス。`"list"`アクション等で正当に使われる)を誤って遮断しないための配慮。
+
+\*\*テスト\*\*: `tests/test\_workspace\_jail.py`を新設し、(1)正常なアクセスの許可、(2)古典的な`"../../../etc/passwd"`型トラバーサルの遮断、(3)今回発見した「前方一致バイパス」(兄弟ディレクトリへの脱走)の遮断、(4)牢獄自身への正当なアクセスの許可、の4パターンを固定した。`mini\_pytest.py`実行結果は`PASS=91`(新規+4)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)で、既存の`"list"`アクション・`AegisSystem`の挙動が壊れていないことも確認した。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。
