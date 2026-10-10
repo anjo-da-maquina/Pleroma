@@ -409,6 +409,18 @@ jail.secure_resolve("../jail_workspace_EVIL/secret.txt")
 
 
 
+\### AB. 同種の文字列前方一致バイパスが`angels/\_common.py`のシークレット漏洩スキャナにも存在していたため修正
+
+§AAで`WorkspaceJail`に見つけた脆弱性パターン(文字列の前方一致のみによる境界判定)が、リポジトリ内の他の場所にも残っていないか`grep`で横断的に点検した結果、もう一箇所で発見した。
+
+\*\*事実確認\*\*: `angels/\_common.py`の`scan\_for\_leaked\_secrets()`(CI上でシークレット漏洩を検知する`angels/gabriel\_canary.py`が使用)は、スキャン除外対象のディレクトリ(`EXCLUDED\_SECRET\_SCAN\_DIRS = {"dummy\_secrets", ".git", "\_\_pycache\_\_", "sefer/.angel\_state", "revelations"}`)との一致判定を`rel.startswith(ex)`という文字列の前方一致のみで行っていた。これは末尾の区切り文字を要求しないため、`"dummy\_secrets\_backup/real\_leaked\_key.env"`のように、除外対象の名前と前方一致するだけの別ディレクトリに置かれた本物のシークレットも、スキャン自体が一切行われずに素通りしてしまう欠陥だった(実機で再現を確認)。これは`WorkspaceJail`の脆弱性とは逆方向(過剰な除外によるセキュリティ機能自体の無効化)だが、根本原因は同一(末尾区切り文字を要求しない文字列前方一致)である。
+
+\*\*修正\*\*: `rel == ex or rel.startswith(ex + "/")`という、完全一致またはそのディレクトリ配下(区切り文字付き)であることを要求する判定に修正した。テスト容易性のため`scan\_for\_leaked\_secrets()`に`root`引数を追加し(既定はリポジトリ本体の`ROOT`)、一時ディレクトリ上の架空のファイル構成で検証できるようにした。
+
+\*\*テスト\*\*: `tests/test\_scan\_for\_leaked\_secrets.py`を新設し、(1)正規のハニーポット(`dummy\_secrets/`)は引き続き除外される、(2)今回発見した「前方一致バイパス」(`dummy\_secrets\_backup/`)に置かれたシークレットは正しく検知される、(3)通常のディレクトリのシークレットも検知される、の3パターンを固定した。`mini\_pytest.py`実行結果は`PASS=94`(新規+3)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。

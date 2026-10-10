@@ -106,15 +106,31 @@ SECRET_PATTERNS = [
 EXCLUDED_SECRET_SCAN_DIRS = {"dummy_secrets", ".git", "__pycache__", "sefer/.angel_state", "revelations"}
 
 
-def scan_for_leaked_secrets():
+def scan_for_leaked_secrets(root: Path = None):
     """dummy_secrets（意図的なハニーポット）を除外し、実際の秘密情報らしき
-    パターンがコミット対象ファイルに紛れ込んでいないかを静的に走査する。"""
+    パターンがコミット対象ファイルに紛れ込んでいないかを静的に走査する。
+
+    [テスト容易性のため 2026-10] rootを明示的に渡せるようにし、
+    tests/test_scan_for_leaked_secrets.py が一時ディレクトリ上の架空の
+    ファイル構成で除外ロジックを検証できるようにしている。既定ではリポジトリ
+    本体のROOTを使う。"""
+    if root is None:
+        root = ROOT
     hits = []
-    for p in ROOT.rglob("*"):
+    for p in root.rglob("*"):
         if not p.is_file():
             continue
-        rel = p.relative_to(ROOT).as_posix()
-        if any(rel.startswith(ex) for ex in EXCLUDED_SECRET_SCAN_DIRS):
+        rel = p.relative_to(root).as_posix()
+        # [脆弱性修正 2026-10] 以前は rel.startswith(ex) という文字列の前方一致
+        # のみで除外対象を判定していたが、末尾の区切り文字を要求しないため、
+        # 除外対象のディレクトリ名と前方一致するだけの別ディレクトリ(例:
+        # "dummy_secrets_backup/real_leaked_key.txt" が "dummy_secrets" と
+        # 前方一致してしまう)も、本当のシークレット漏洩の有無を一切スキャン
+        # せずに除外してしまう欠陥があった(src/workspace_manager.pyの
+        # WorkspaceJailで見つかったのと同種のバイパス。GRIMOIRE.md §AA参照)。
+        # 完全一致、またはそのディレクトリ配下(区切り文字付き)であることを
+        # 要求するよう修正した。
+        if any(rel == ex or rel.startswith(ex + "/") for ex in EXCLUDED_SECRET_SCAN_DIRS):
             continue
         if p.suffix not in {".py", ".json", ".md", ".yml", ".yaml", ".txt", ".env", ".ini"}:
             continue
