@@ -357,6 +357,24 @@ Metatronが提案する禁止イベントは`sefer/raziel_ledger_pending.json`�
 
 
 
+\### Y. 防衛ダッシュボード(`tools/generate\_dashboard.py`)を新設
+
+ユーザーからの「記録室を作る(可視化・ダッシュボード)」という依頼に基づき新設した。これまでArmageddon Engineの戦績・Michaelの実遮断ログ・現在の禁止イベント一覧・各種人間承認待ちキューは、個別に`cat`するしかなく、全体の傾向を一目で把握する手段が無かった。
+
+\*\*実装\*\*: `tools/generate\_dashboard.py`が以下を読み取り、単一の自己完結したHTML(`dashboard.html`、外部CDN等への依存なし・オフライン閲覧可能)にまとめる。
+\- `tartarus/akashic\_records.json` — Armageddon Engine(Lucifer vs Metatron)の戦績。総戦績数・突破された回数・防御成功率・QAスコアの推移(簡易SVGグラフ)・直近20件の戦闘記録表
+\- `sefer/audit\_chain.jsonl` — Michaelが実際に遮断したイベントの監査ログ。総遮断件数・イベント種別ごとの件数(簡易SVGグラフ)
+\- `sefer/raziel\_ledger.json` — 現在有効な禁止イベント一覧
+\- `sefer/raziel\_ledger\_pending.json`・`shield\_rules\_pending.json`・`provisioning\_pending.json` — キュー別の人間承認待ち件数
+
+いずれのデータファイルも「存在しない場合」(初回実行時や、該当する防衛サイクルを一度も回していない場合)を例外を出さずに「データがありません」等で表示できるよう設計した。`build\_dashboard()`は各データファイルのパスを明示的に注入できるようにし、実データに依存せずテストできる構造にした。
+
+\*\*テスト\*\*: `tests/test\_generate\_dashboard.py`を新設し、架空データでの集計結果の反映確認、および全データファイルが存在しない場合でも例外なく生成できることを固定した。`mini\_pytest.py`実行結果は`PASS=81`(新規+2)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+\*\*その他\*\*: 生成物`dashboard.html`はビルド成果物のため`.gitignore`に追加し、Git管理対象外とした。`COMMANDS.md`に起動コマンド(`python tools/generate\_dashboard.py`)を追記した。
+
+
+
 \## 4. 創造主の絶対権限（The Creator's Air）
 
 Tartarusのエンジンは、起動直後に `uuid.getnode()` を用いてホストマシンの物理MACアドレスを取得し、不可逆ハッシュ（SHA-256）に変換して検証する。

@@ -30,3 +30,8 @@ anjo-da-maquina
 # 事故を受けての再発防止。GRIMOIRE.md §M参照)。
 jail_workspace/
 db_config_backup.py
+
+# [2026-10] tools/generate_dashboard.pyが生成する静的HTMLレポート。
+# 生成元データ(戦績・監査ログ等)が変わるたびに古いスナップショットが
+# コミットされ続けるのを避けるため、ビルド成果物としてGit管理対象外とする。
+dashboard.html
