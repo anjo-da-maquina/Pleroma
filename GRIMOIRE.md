@@ -503,3 +503,25 @@ chain.record("AI_ACTION", {...})
 \*\*検討\*\*: 本モジュールの`banned\_modules = {'os', 'sys', 'shutil', 'subprocess'}`は、既に`aegis\_system.py`経由で実運用されているGabriel(`sefer.inquisition()`)の`forbidden\_modules`(pickle/ctypes/importlib/socket/urllib/requests/http/subprocess/os)より広く、`sys`・`shutil`の単純importだけで即座に拒否する。しかし`sys`単体のimport(`sys.exit()`・`sys.argv`等)自体には危険性がなく、本当に危険なのは`sys.settrace`等の個別関数呼び出しであり、それは既にMichael(`sefer.\_michael\_absolute\_defense`)がOSレベルの監査フックで個別に遮断している。Gabrielが意図的に`sys`/`shutil`の単純importまでは禁止対象に含めない設計になっているのは、まさにこの過剰検知を避けるための判断であり、`ast\_scanner.py`をそのまま統合すると、AIが生成した無害なコード(単に`sys`をimportするだけ等)まで一律拒否してしまう構造的な後退になる。
 
 \*\*判断\*\*: 実運用パイプラインへは統合しない。§Lの`cassiels\_veil.py`(別の設計思想を示す教材として統合せず保持)と同じ扱いとし、`src/ast\_scanner.py`のdocstringに本判断の経緯と理由を明記した。これにより、どこからもimportされない孤立モジュールが「現在も有効な防壁の一部であるかのような外観」を保ち続け、将来の開発者(あるいは別のAIセッション)を誤解させるリスクを解消した。テストファイルの削除は行わず、既存のテストカバレッジはそのまま維持する(§Lの`cassiels\_veil.py`と同様、動作検証済みの代替設計として保持する価値があるため)。`mini\_pytest.py`実行結果は変化なし(`PASS=103 XFAIL=2 FAIL=0 ERROR=2`)。
+
+\### AG. 「学習したつもりになっているだけ」— `raziel\_ledger.json`/`shield\_rules.json`が人間承認後も実際の防御(Michael/Gabriel)に一切反映されていなかった構造的欠陥を発見・修正
+
+ユーザーからの3度目の「更なる進化を」という依頼を受けた棚卸しの続きで、§AFの`ast\_scanner.py`統合判断の精査中、「このシステムは攻撃から学習して進化する」という本フレームワークの核心的な謳い文句そのものが、実際には機能していないことに気づいた。これはこれまでの§AA〜§AEのような「個別の防壁の抜け道」とは異なり、\*\*2つの「学習」ワークフロー全体が実質的な置物(デコレーション)に過ぎなかった\*\*という、より根本的な発見である。
+
+\*\*事実確認\*\*: 本フレームワークには2つの「人間承認を経て防壁を強化する」パイプラインが存在する。
+
+1. `tartarus/armageddon.py`(Lucifer vs Sefer自己対戦)がMetatronを通じて新たな脱走経路を発見 → 人間が`tools/promote\_ledger\_seal.py --approve`で承認 → `sefer/raziel\_ledger.json`の`banned\_events`に追加。
+2. `angelic\_shield.py`(外部LLM脅威インテリジェンス)が危険なモジュール/関数を発見 → 人間が`tools/promote\_shield\_seal.py --approve`で承認 → `shield\_rules.json`の`blocked\_modules`/`blocked\_functions`に追加。
+
+両方とも、承認された内容を検証するCI向け「天使」(`angels/raziel\_auditor.py`・`angels/zadkiel\_shield\_decree.py`)は存在するが、それらは\*\*ファイルのスキーマ・ワークフローの構造的な健全性のみ\*\*を検証しており、「実際にMichael(`sefer.\_michael\_absolute\_defense`、OSレベルの実行時防壁)やGabriel(`sefer.inquisition()`、静的AST解析)がこのファイルを読み込んで判断に使っているか」は一切検証していなかった。実際に全文検索で確認した結果、`raziel\_ledger.json`・`shield\_rules.json`のいずれも、`sefer/\_\_init\_\_.py`からは一度も参照されていなかった。つまり、「Armageddonで新しい攻撃を発見し、人間が承認して防壁ルールを更新した」としても、\*\*次にAIが同じ攻撃を試みたときに、その学習結果は何の役にも立たず素通りしてしまう\*\*状態だった。これは個別の脆弱性バイパスよりも深刻で、本フレームワークの「進化」という中核的な価値提案そのものが機能していなかったことを意味する。
+
+\*\*修正にあたっての安全性の確認(重要)\*\*: `raziel\_ledger.json`の既定値には`"os.remove"`・`"os.rename"`・`"socket.connect"`のように、Michaelが既に個別の条件付きチェック(`allowed\_dirs`/`allowed\_hosts`)で扱っているイベント名が含まれている。これらを無条件の絶対拒否として組み込むと、AI自身の`jail\_workspace`配下での正当なファイル操作や、ローカルOllamaサーバーへの正当な接続まで一律遮断する重大な機能破壊になることを実機で確認した。同様に、`shield\_rules.json`の`blocked\_functions`(`"loads"`・`"load"`等)を裸の名前のまま追加すると、`json.loads(...)`のような全く無害な呼び出しまでcritical判定で一律ブロックする過剰検知になることも確認した。
+
+\*\*修正\*\*:
+- Michael側: `\_michael\_absolute\_defense`の既存の各条件付きチェック(open/os.open/dest構造的ops/rename/socket/デフォルト拒否)がすべて`return`で処理し終えた\*\*後\*\*に到達する最終チェックとして、`raziel\_ledger.json`の`banned\_events`を読み込み絶対拒否する処理を追加した。これにより、既存カテゴリで既にカバーされているイベント(os.remove等)は従来通りの条件付き挙動を維持したまま、どのカテゴリにも該当しない\*\*未知の新しい脱走経路\*\*だけを新たに絶対拒否できるようにした。
+- Gabriel側: `inquisition()`に`shield\_rules.json`の`blocked\_modules`を既存の`forbidden\_modules`(severity: high、非ブロッキング)に追加し、`blocked\_functions`は`blocked\_modules`との直積(例: `"dill.loads"`)としてのみ完全修飾名で`forbidden\_funcs`(severity: critical)に追加するようにした。裸の名前では照合しないため、`json.loads`等の無関係な同名関数を誤検知しない。
+- 両方とも、ファイルのmtimeをキャッシュキーとして使い、audit hookの頻繁な呼び出しごとに毎回ファイルを読み直す性能劣化を避けつつ、人間の承認がプロセス再起動不要で即座に反映されるようにした。
+
+\*\*テスト\*\*: `tests/test\_learned\_rules\_enforcement.py`を新設し、(1)raziel\_ledgerで承認された未知のイベントが絶対拒否されること、(2)承認されていない未知のイベントは従来通り素通りすること、(3)既存カテゴリで既にカバーされているイベント(os.remove等)に回帰が起きないこと、(4)shield\_rulesで承認された完全修飾関数(dill.loads)がcriticalとして検知されること、(5)無関係な同名関数(json.loads)が誤検知されないこと、(6)shield\_rules.json不在時にフェイルセーフに動作すること、の6パターンを固定した。`angels/zadkiel\_astrolabe.py`・`angels/zadkiel\_shield\_decree.py`・`angels/raziel\_auditor.py`を実行し、実際のCI向け検査スクリプトが新方式でも正しく動作することも確認した。`mini\_pytest.py`実行結果は`PASS=109`(新規+6)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+なお、テスト実装上の注意として、`sefer`モジュールは`sys.addaudithook`/`os.write`をプロセス全体へ副作用として適用するため、`importlib.reload()`すると`os.write`の多重ラップによる無限再帰を引き起こすことを実機で発見した(テスト実装中に`tests/test\_read\_restriction.py`で`RecursionError`として再現)。本番コードに影響する脆弱性ではないが、テストの書き方として記録しておく: 本モジュールを検証する際はreloadせず、`monkeypatch.setattr()`でパス定数とキャッシュ辞書を直接差し替えること。

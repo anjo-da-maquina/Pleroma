@@ -5,6 +5,7 @@ import base64
 import codecs
 import socket
 import json
+import re
 import time
 import threading
 from pathlib import Path
@@ -136,6 +137,59 @@ _HARD_DENY_EVENTS = {
     "marshal.loads", "pickle.find_class"
 }
 
+# Pythonの audit event 名として妥当な形式のみ許可（例: "os.system", "subprocess.Popen"）。
+# tartarus/armageddon_core.py / angels/_common.py と同一の正規表現。
+VALID_EVENT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$")
+
+# [脆弱性修正 2026-10] `tartarus/armageddon.py`(Lucifer vs Sefer自己対戦)が
+# 発見し、`tools/promote_ledger_seal.py`で人間が明示的に承認した新たな禁止
+# イベント(`sefer/raziel_ledger.json`の`banned_events`)は、これまで
+# `_michael_absolute_defense`から一切読み込まれておらず、承認してもシステム
+# の実際の防御には何ら反映されない「学習したつもりになっているだけ」の状態
+# だった(`angels/raziel_auditor.py`はファイルのスキーマ検証のみで、実際に
+# 読み込まれ enforce されているかは検証していなかった)。
+#
+# [設計上の制約・安全性の確認] 本番の`sefer/raziel_ledger.json`には既定で
+# "os.remove"・"os.rmdir"・"os.rename"・"socket.connect"のように、Michael
+# が既に個別の条件付きチェック(allowed_dirs/allowed_hosts。下記の各`return`
+# 文)で扱っているイベント名が含まれている。これらを本関数の先頭で無条件の
+# 絶対拒否として扱うと、AI自身のjail_workspace配下での正当なファイル操作や、
+# ローカルOllamaサーバーへの正当な接続まで一律遮断してしまう重大な機能破壊
+# になる(実機で確認済み)。そのため、本チェックは既存の各条件付きチェックが
+# 既に`return`で処理し終えた後に到達する関数の\*\*最後\*\*でのみ適用する。
+# これにより、既存の条件付きチェックで既にカバーされているイベント名
+# (os.remove等)は従来通りの挙動(allowed_dirs内なら許可)を維持したまま、
+# どのカテゴリにも当てはまらない\*\*未知の新しい脱走経路\*\*(Armageddonが
+# 今後発見し人間が承認した、現行のどの固定カテゴリにも該当しないイベント)
+# だけを新たに絶対拒否できるようにする。ファイルのmtimeをキャッシュキーに
+# 使い、audit hookの頻繁な呼び出しごとに毎回ファイルを読み直すことによる
+# 性能劣化を避けつつ、人間の承認がプロセス再起動不要で即座に反映されるよう
+# にする。
+_RAZIEL_LEDGER_PATH = Path("sefer/raziel_ledger.json")
+_dynamic_banned_events_cache = {"mtime": None, "events": frozenset()}
+
+
+def _load_dynamic_banned_events() -> frozenset:
+    try:
+        mtime = _RAZIEL_LEDGER_PATH.stat().st_mtime
+    except OSError:
+        return frozenset()
+    if _dynamic_banned_events_cache["mtime"] == mtime:
+        return _dynamic_banned_events_cache["events"]
+    try:
+        with open(_RAZIEL_LEDGER_PATH, "r", encoding="utf-8") as f:
+            ledger = json.load(f)
+        events = frozenset(
+            e for e in ledger.get("banned_events", [])
+            if isinstance(e, str) and VALID_EVENT_NAME_RE.match(e)
+        )
+    except Exception:
+        events = frozenset()
+    _dynamic_banned_events_cache["mtime"] = mtime
+    _dynamic_banned_events_cache["events"] = events
+    return events
+
+
 _hook_state = threading.local()
 
 def _michael_absolute_defense(event: str, args: tuple):
@@ -225,6 +279,18 @@ def _michael_absolute_defense(event: str, args: tuple):
             whitelisted_events = {"os.stat", "os.listdir", "os.getcwd", "os.path", "socket.getaddrinfo", "socket.socket", "socket.__init__"}
             if event not in whitelisted_events:
                 _trigger_violation(event, args, f"Default-deny blocked unwhitelisted system event '{event}'.")
+            return
+
+        # 5. [脆弱性修正 2026-10] Armageddonの自己対戦が発見し、人間が承認した
+        # 未知の脱走経路(sefer/raziel_ledger.json)を、ここで初めて enforce する。
+        # 上記1〜4のいずれかで既に`return`済みのイベント(os.remove等、既存の
+        # 条件付きチェックで処理されるもの)はこの行に到達しないため、既存の
+        # allowed_dirs/allowed_hosts に基づく挙動は変わらない。ここに到達する
+        # のは、どの既存カテゴリにも該当しなかった(=これまで一切チェックされ
+        # ていなかった)イベントのみであり、そのうち raziel_ledger.json で
+        # 承認済みのものだけを絶対拒否する。
+        if event in _load_dynamic_banned_events():
+            _trigger_violation(event, args, f"Raziel's Ledger(学習済みの禁止イベント)が'{event}'を遮断しました。")
     finally:
         _hook_state.in_hook = False
 
@@ -239,6 +305,60 @@ class Finding:
     lineno: int
     message: str
 
+_SHIELD_RULES_PATH = Path("shield_rules.json")
+_dynamic_shield_rules_cache = {"mtime": None, "modules": frozenset(), "funcs": frozenset()}
+
+
+def _load_dynamic_shield_rules() -> tuple:
+    """
+    [脆弱性修正 2026-10] `tools/promote_shield_seal.py`で人間が承認した
+    外部脅威インテリジェンス(`shield_rules.json`の`blocked_modules`/
+    `blocked_functions`)は、これまでGabriel(`inquisition()`)から一切
+    読み込まれておらず、承認してもシステムの実際の検閲には何ら反映されない
+    「学習したつもりになっているだけ」の状態だった(`angels/zadkiel_shield_decree.py`
+    は承認ワークフロー自体の構造検証のみで、実際にenforceされているかは
+    検証していなかった。`sefer/raziel_ledger.json`がMichael側から一切
+    読まれていなかった件と同種の欠陥。本ファイル内の対になる修正も参照)。
+
+    [安全な適用方法] `blocked_functions`(例: "loads", "load", "Unpickler")を
+    裸の名前のまま`forbidden_funcs`に追加すると、`json.loads(...)`や
+    `yaml.load(...)`のような全く無害な呼び出しまで"critical"判定で一律
+    ブロックしてしまう重大な過剰検知になる(実機で確認: "loads"は`json`
+    モジュールでも極めて一般的な関数名)。そのため、`blocked_functions`は
+    `blocked_modules`との直積(例: "pickle.loads", "dill.loads")としてのみ
+    `forbidden_funcs`に加え、完全修飾名(`qualified_name`)でのみ照合させる
+    (裸の`func_name`では一致しない)ことで、意図した"pickle経由の
+    デシリアライズ"のような呼び出しだけを狙い撃ちし、無関係な同名関数を
+    誤検知しないようにする。`blocked_modules`自体は既存の`forbidden_modules`
+    と同じ"high"(非ブロッキング)severityのまま追加するのみとし、既存の
+    severity設計(bareなimportだけでは拒否しない)との一貫性を保つ。
+    """
+    try:
+        mtime = _SHIELD_RULES_PATH.stat().st_mtime
+    except OSError:
+        return frozenset(), frozenset()
+    if _dynamic_shield_rules_cache["mtime"] == mtime:
+        return _dynamic_shield_rules_cache["modules"], _dynamic_shield_rules_cache["funcs"]
+    try:
+        with open(_SHIELD_RULES_PATH, "r", encoding="utf-8") as f:
+            rules = json.load(f)
+        modules = frozenset(
+            m for m in rules.get("blocked_modules", []) if isinstance(m, str) and m
+        )
+        funcs = frozenset(
+            f"{m}.{fn}"
+            for m in modules
+            for fn in rules.get("blocked_functions", [])
+            if isinstance(fn, str) and fn
+        )
+    except Exception:
+        modules, funcs = frozenset(), frozenset()
+    _dynamic_shield_rules_cache["mtime"] = mtime
+    _dynamic_shield_rules_cache["modules"] = modules
+    _dynamic_shield_rules_cache["funcs"] = funcs
+    return modules, funcs
+
+
 def inquisition(source_code: str, context: dict = None) -> List[Finding]:
     findings: List[Finding] = []
     if not isinstance(source_code, str):
@@ -248,8 +368,9 @@ def inquisition(source_code: str, context: dict = None) -> List[Finding]:
     except Exception as e:
         return [Finding("GAB-003", "critical", 0, f"AST parse failed: {e}")]
 
-    forbidden_modules = {"pickle", "ctypes", "importlib", "socket", "urllib", "requests", "http", "subprocess", "os"}
-    forbidden_funcs = {"__import__", "getattr", "eval", "exec", "compile", "os.system", "subprocess.Popen"}
+    dynamic_modules, dynamic_funcs = _load_dynamic_shield_rules()
+    forbidden_modules = {"pickle", "ctypes", "importlib", "socket", "urllib", "requests", "http", "subprocess", "os"} | dynamic_modules
+    forbidden_funcs = {"__import__", "getattr", "eval", "exec", "compile", "os.system", "subprocess.Popen"} | dynamic_funcs
     dunder_chains = {"__class__", "__subclasses__", "__globals__", "__builtins__"}
 
     # [脆弱性修正 2026-10] forbidden_funcs には "os.system" / "subprocess.Popen"
