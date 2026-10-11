@@ -27,6 +27,14 @@ sefer/.audit_signing_key
 # ハッシュ連鎖に署名するための秘密鍵。初回自動生成・0600権限で作成される
 # ローカル専用の秘密情報であり、Gitにコミットしてはならない(GRIMOIRE §AH参照)。
 .zk_audit_signing_key
+# [2026-10] adapters/excel_to_yaml_parser.py が requirements.xlsx(存在する
+# 場合)から生成するYAML成果物。ビルド成果物であり、Git管理対象外とする
+# (GRIMOIRE.md §AJ参照)。
+sefer/external_requirements.yaml
+# [2026-10] 本リポジトリにはまだ外部要件Excelシートが導入されていないが、
+# adapters/excel_to_yaml_parser.py のテスト・ローカル検証時に誤って
+# コミットされることを防ぐため、念のため無視対象に加える。
+requirements.xlsx
 remote_ledger_sync.log
 vital_feed.sig
 fake_admin_credentials.py

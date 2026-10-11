@@ -553,3 +553,19 @@ chain.record("AI_ACTION", {...})
 なお、この安全装置はpytestの`tmp_path`のような十分に深いテスト用一時ディレクトリには一切影響しない(深さの閾値を十分に満たすため)。既存の`tests/test_uriel_phoenix_reset.py`の5件は無変更のまま全てPASSし続けることを確認済み。
 
 \*\*テスト\*\*: `tests/test_uriel_phoenix_safety_guardrail.py`を新設し、(1)ファイルシステムのルートが拒否されること、(2)ホームディレクトリが拒否されること、(3)浅いパス(実在しない架空のパスで検証)が既定で拒否されること、(4)`allow_shallow_path=True`で明示的に解除できること、(5)既存の正常系(十分に深いtmp_path)が無影響であること、(6)talismanも同様に検証されること、の6パターンを固定した。CLIから`python tools/incident_reset.py --core-dir / --yes`を実際に実行し、`rmtree`に到達する前に拒否されることを実機で確認した。`mini_pytest.py`実行結果は`PASS=121`(新規+6)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+\### AJ. adapters/excel\_to\_yaml\_parser.py・adapters/external\_qa\_wrapper.py — CIに残っていた「名前だけの検査」2件 (2026-10)
+
+\*\*発見\*\*: `angels/_common.py`のdocstringには、§刷新前の`angels/*.py`の大半(33ファイル中28ファイル)が`print('... initialized. Zero-Trust audit passed.')`のみの中身のないプレースホルダーだったという記録が残っている。この記録を踏まえ、`angels/`以外のCI実行対象である`adapters/`配下も同じ観点で確認したところ、`excel_to_yaml_parser.py`と`external_qa_wrapper.py`の2ファイルが、全く同じ2行のプレースホルダー(`import os, sys` / `print(f'... Zero-Trust audit passed.')`)のまま放置されていることが分かった。
+
+たとえるなら、\*\*「検品ラインに『検品済み』のスタンプだけが置かれていて、実際には製品を一度も検品していない」\*\*状態である。`.github/workflows/anjo_da_maquina_protocol.yml`を確認すると、この2つは実際にCIのステップ「3.8. 外部要件の抽出 (Excel to YAML Parser)」「18. 外部QAツールの実行 (External QA Adapter)」として組み込まれており、他の26個の天使ステップと並んで、あたかも実質的な検査が行われ合格したかのように毎回報告していた。しかし実際には、Excelファイルを一度も読んでおらず、外部のQAツールを一度も実行していない。
+
+さらに強い状況証拠として、CIの「3. 供物の準備 (Install Dependencies)」ステップでは`openpyxl`(Excel読み込み)と`playwright`(ブラウザ自動化。かつ`playwright install chromium --with-deps`で実際にヘッドレスブラウザまでインストールしている)が明示的にインストールされているにもかかわらず、リポジトリ内のどのスクリプトもこの2つのライブラリを一度も使用していなかった(`grep -rl playwright`・`grep -rl openpyxl`いずれもゼロ件、本修正前)。インストールされているのに誰も使っていない依存関係は、「実装するはずだったが実装されなかった機能」が存在することの明確な痕跡である。
+
+\*\*修正\*\*: 両ファイルに、名前が示す役割に対応した実質的な処理を実装した。
+
+  - `excel_to_yaml_parser.py`: リポジトリルートの`requirements.xlsx`(1行目をヘッダ行とする表形式の外部要件シート)が存在する場合、実際に`openpyxl`で読み込み、各行をヘッダ名をキーとするレコードとして`sefer/external_requirements.yaml`へYAML化する。空セル・完全に空の行は適切に省略する。`requirements.xlsx`がまだ投入されていない現状(これが実際の状態)では、他の天使スクリプトと同じ「対象が存在しない場合は正直にスキップを報告する」パターンに従い、偽の成功を名乗らず「検査対象なし」として正常終了する。
+
+  - `external_qa_wrapper.py`: `architecture.html`(`angels/ophanim_thousand_eyes.py`が静的に検査している対象と同一ファイル)を、実際に`Playwright`のヘッドレスChromiumでレンダリングし、(1)JavaScriptの未捕捉例外(pageerror)、(2)コンソールのerrorレベルのログ、の両方を動的に検知する。`ophanim_thousand_eyes.py`の静的解析(ファイルの中身を読むだけ)を、実際にブラウザでコードを実行する動的検証で補完する多層防御になっている。対象ファイルが存在しない場合は同様に「検査対象なし」として正直に報告する。
+
+\*\*テスト\*\*: `tests/test_adapters_excel_to_yaml_parser.py`(3件)・`tests/test_adapters_external_qa_wrapper.py`(4件)を新設した。前者は、対象ファイル不在時に偽の成功を名乗らないこと・実際のExcelファイルが正しくYAML化されること・完全に空の行が省略されることを固定。後者は、対象ファイル不在時の正直な報告・正常なHTMLの合格・意図的に埋め込んだJavaScript未捕捉例外とconsole.errorの両方が実際に検知されることを固定した(旧実装では検知不可能だったことを、実際にブラウザで実行させて確認している)。実機で`cp architecture.html`を破壊的なスクリプト付きで一時的に書き換え、実際にFAILすることを手動でも確認した上で原状復帰した。`mini_pytest.py`実行結果は`PASS=128`(新規+7)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
