@@ -25,6 +25,45 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: 2.5. 天使の記憶 (Angel State Cache - 実行間の検査状態を永続化)
+        # [脆弱性修正 2026-10 §AN] angels/sandalphon_anchor.py・
+        # angels/metatron_commitment.py は sefer/.angel_state/ 配下に
+        # 「前回実行時のチェックポイント」を保存し、次回実行時にそれと比較する
+        # ことで監査証跡のロールバック・改ざんを検知する設計になっている。
+        # しかし本ワークフローには actions/cache (または他の永続化手段)が
+        # 一度も存在せず、.angel_state/ は .gitignore 対象でもあるため、
+        # GitHub Actionsの使い捨てランナー上ではチェックアウト直後は毎回
+        # 必ず空になっていた。結果として sandalphon_anchor.py の
+        # `if checkpoint:` 分岐(改ざん検知の本体)はCI上で一度も実行された
+        # ことがなく、名乗っている役割(証跡のブロックチェーン刻印・改ざん
+        # 検知)を一切果たせていない「無人の検問所」状態だった(実機検証済み:
+        # 本ワークフローにactions/cache・actions/upload-artifact・
+        # actions/download-artifactのいずれも一件も存在しないことを確認)。
+        # これはGRIMOIRE.md §AHで修正したZKAuditTrail(プロセスグローバルが
+        # 毎回リセットされ検知が発火しない)と同種の「検知ロジック自体は
+        # 正しいが、前提とする状態が実行環境で一度も満たされない」という
+        # 構造的な見せかけだった。
+        #
+        # 本修正では、同じキーで保存し続けると(完全一致時はcacheの保存
+        # 自体がスキップされ更新されなくなる)actions/cacheの既定挙動により
+        # チェックポイントが更新されなくなるため、保存キーに
+        # `github.run_id`(実行ごとに一意)を用いて必ず保存を発生させ、
+        # 復元時は固定プレフィックスの restore-keys で「直前の最新の
+        # チェックポイント」を取得する(GitHub Actions公式が推奨する
+        # 「更新され続けるキャッシュ」の標準パターン)。
+        #
+        # [残存する限界] actions/cache にも7日間アクセスが無いと自動失効する
+        # 等の制約があり、恒久不変の外部監査サービスの代替にはならない
+        # (sefer/audit_chain.py の鍵管理と同種の、誠実に明記すべき限界)。
+        # それでも「CI上では構造的に一度も発火しない」状態から
+        # 「通常の実行頻度では実際に機能する」状態への改善である。
+        uses: actions/cache@v4
+        with:
+          path: sefer/.angel_state
+          key: angel-state-${{ github.run_id }}
+          restore-keys: |
+            angel-state-
+
       - name: 3. 供物の準備 (Install Dependencies)
         run: |
           python -m pip install --upgrade pip
