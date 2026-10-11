@@ -1,4 +1,29 @@
-﻿import os
+﻿"""
+src/intelligence_cycle.py
+===========================
+[棚卸し 2026-10 §AM] 本ファイルは `src/metatron_orchestrator.py` から
+`RazielIntelligence`・`SamaelWeaponization` として実際に使われている
+(孤立モジュールではない)が、精査の過程で以下2点の死んだ残骸が見つかった。
+
+  1. `from angelic_evolution import EvolvingAngel` — インポートされてい
+     たが、本ファイル内のどのクラス・関数からも一度も参照されていなかった
+     (`RazielIntelligence`はAegisSystemのみ、`SamaelWeaponization`は
+     CollarProtocolのみを使う)。`src/metatron_orchestrator.py`側が
+     `EvolvingAngel`を独自に`angelic_evolution`から直接importしており、
+     本ファイル経由での再importは最初から不要だった可能性が高い。
+
+  2. `def execute_kill_chain(): pass` と `if __name__ == "__main__": pass`
+     — いずれも何もしない空の関数・エントリポイントで、リポジトリ全体を
+     検索しても`execute_kill_chain`の呼び出し元は一件も存在しなかった。
+     `src/metatron_orchestrator.py`の新設(本ファイルの各クラスを統括する
+     正式なオーケストレータ)により置き換えられた後、削除されずに残った
+     抜け殻と判断した。
+
+本修正では、未使用のimportと、何もしない空の関数・エントリポイントを
+削除した。`RazielIntelligence`・`SamaelWeaponization`本体の挙動は変更
+していない。
+"""
+import os
 import sys
 import json
 import re
@@ -7,7 +32,6 @@ import time
 
 try:
     from aegis_system import AegisSystem
-    from angelic_evolution import EvolvingAngel
     from deadmans_switch import CollarProtocol
 except ModuleNotFoundError:
     print("[エラー] 必要な防壁モジュールが見つかりません。")
@@ -101,8 +125,3 @@ class SamaelWeaponization:
         
         raise ValueError("規定回数内でサマエルが毒の生成に失敗しました。")
 
-def execute_kill_chain():
-    pass
-
-if __name__ == "__main__":
-    pass

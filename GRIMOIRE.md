@@ -593,3 +593,19 @@ chain.record("AI_ACTION", {...})
 たとえるなら、\*\*「"掃除道具入れ"と書かれた棚を開けたら、何年も前に作ろうとして放置された、別の部屋の試作品の鍵が入っていた」\*\*状態である。実害を及ぼすものではなかったが(前述の通り、実行されても即座に自壊するだけ)、何の説明も参照もない孤立したコードが残っていることは、将来の開発者やAI自身を混乱させ、「`purify_tests.py`とは何をするものか」という誤った推測を招く。ユーザーからの「いらないものは削除して大丈夫です」という恒久的な許可に基づき、本ファイルを削除した。
 
 \*\*検証\*\*: 削除後に`mini_pytest.py`を再実行し、`PASS=134 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)に変化がないことを確認した(そもそも何からも参照されていなかったため、当然の結果ではあるが、削除が安全であることの最終確認として行った)。
+
+\### AM.
+
+\*\*発見\*\*: `src/intelligence\_cycle.py`(`RazielIntelligence`・`SamaelWeaponization`を提供し、`src/metatron\_orchestrator.py`から実際に呼ばれている現役ファイル)の棚卸し中、2点の死んだ残骸を発見した。
+
+1\. `from angelic\_evolution import EvolvingAngel` というimportが先頭に存在したが、本ファイル内の`RazielIntelligence`(`AegisSystem`のみ使用)・`SamaelWeaponization`(`CollarProtocol`のみ使用)のいずれからも一度も参照されていなかった。`src/metatron\_orchestrator.py`は`EvolvingAngel`を`angelic\_evolution`から直接importしており、本ファイル経由の再exportに依存している箇所はリポジトリ内に一件も無かった。
+
+2\. ファイル末尾に`def execute\_kill\_chain(): pass`という何もしない空の関数と、`if \_\_name\_\_ == "\_\_main\_\_": pass`という何もしないエントリポイントが残っていた。`grep -rn "execute\_kill\_chain"`でリポジトリ全体を検索しても、定義行そのもの以外に呼び出し元は一件も存在しなかった。
+
+\*\*たとえ話\*\*: これは、会社の組織図に「統括部長」のポストが新設され、実際にそのポストの人(`src/metatron\_orchestrator.py`の`MetatronOrchestrator`)が業務を回しているのに、古い「現場監督」(`execute\_kill\_chain`)の机と名札だけがまだオフィスの隅に残っている状態である。誰もその机を使っていないし、その名札の人に仕事を頼む人もいない。さらに言えば、その現場監督の名刺入れには、使われていない別部署の内線番号(`EvolvingAngel`のimport)まで印刷されたままだった。
+
+\*\*原因\*\*: `src/metatron\_orchestrator.py`が本ファイルの各クラスを統括する正式なオーケストレータとして新設された際、置き換えられたはずの古いエントリポイントと、使われなくなったimportが削除されずに残った。§L(`tools/purify\_tests.py`)と同種の「リファクタリング後の抜け殻」パターンだが、§Lはファイル全体が孤立していたのに対し、本件はファイル自体は現役で使われており、その中の一部の要素だけが死んでいた点が異なる。
+
+\*\*対応\*\*: 未使用のimport(`EvolvingAngel`)と、何もしない空の関数・エントリポイント(`execute\_kill\_chain`・`\_\_main\_\_`ブロック)を削除した。`RazielIntelligence`・`SamaelWeaponization`本体の挙動、および`src/metatron\_orchestrator.py`からの呼び出し経路は変更していない。
+
+\*\*検証\*\*: 削除後に`mini\_pytest.py`を再実行し、`PASS=134 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ、§AL時点から変化なし)であることを確認した。特に`tests/test\_metatron\_orchestrator.py`が引き続きPASSすることを確認し、`src/metatron\_orchestrator.py`からの`RazielIntelligence`・`SamaelWeaponization`の利用に影響が無いことを固定した。
