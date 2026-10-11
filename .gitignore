@@ -23,6 +23,10 @@ sefer/audit_chain.jsonl
 # 署名するための秘密鍵。初回自動生成・0600権限で作成されるローカル専用の
 # 秘密情報であり、Gitにコミットしてはならない(GRIMOIRE.md §AE参照)。
 sefer/.audit_signing_key
+# [2026-10] maquina_gatekeeper.py の ZKAuditTrail がHMAC-SHA256で鍵付き
+# ハッシュ連鎖に署名するための秘密鍵。初回自動生成・0600権限で作成される
+# ローカル専用の秘密情報であり、Gitにコミットしてはならない(GRIMOIRE §AH参照)。
+.zk_audit_signing_key
 remote_ledger_sync.log
 vital_feed.sig
 fake_admin_credentials.py

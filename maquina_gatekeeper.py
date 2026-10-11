@@ -3,18 +3,20 @@ import os
 import rsa
 import base64
 import hashlib
+import hmac
 import platform
 import subprocess
 import sys
 import threading
 from datetime import datetime
+from pathlib import Path
 
 class LossOfAtaraxia(Exception):
     pass
 
 _GLOBAL_SANCTUARY_LOCK = threading.Lock()
 _AUDIT_HOOK_REGISTERED = False
-_LAST_KNOWN_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
+_GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 _LAST_TIMESTAMP = datetime.min
 
 # [脆弱性修正 2026-10] 以前はスレッドごとに独立した封鎖ステータス
@@ -88,7 +90,65 @@ def _register_audit_hook_once():
     except Exception:
         pass
 
+def _load_or_create_zk_signing_key(key_path: Path) -> bytes:
+    """[脆弱性修正 2026-10] ZKAuditTrailのハッシュ連鎖に鍵付けするための
+    ローカル専用秘密鍵。初回自動生成・0600権限で作成する
+    (sefer/audit_chain.pyのSignedAuditChainと同一パターン。GRIMOIRE §AE参照)。"""
+    key_path = Path(key_path)
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    if key_path.exists():
+        return key_path.read_bytes()
+    new_key = os.urandom(32)
+    fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(new_key)
+    except FileExistsError:
+        return key_path.read_bytes()
+    return new_key
+
+
+_ZK_SIGNING_KEY_PATH = Path(".zk_audit_signing_key")
+
+
 class ZKAuditTrail:
+    """
+    [脆弱性修正 2026-10 §AH] 以前の実装には、致命的な欠陥が二つ重なっていた。
+
+    欠陥1(鍵無し・改ざん耐性ゼロ): "current_hash"は秘密鍵を使わない単純な
+    SHA-256であり、ファイルへの書き込み権限を持つ攻撃者なら、任意のブロック
+    (侵入記録等)を削除した上でチェーン全体を先頭から秘密鍵なしに再計算し
+    直すだけで、検知を一切受けずに改ざんできた(sefer/audit_chain.pyの
+    SignedAuditChainと同種のバグ。GRIMOIRE §AE参照)。
+
+    欠陥2(検証自体が実質的に死んでいた): 旧実装の改ざん検知は、プロセス
+    起動時に"0000...0"へ初期化される**モジュールグローバル変数**
+    `_LAST_KNOWN_HASH`と、ファイル末尾の"current_hash"を比較するだけ
+    だった。しかし本フレームワークの実運用では`enforce_maquina_seal`で
+    保護された関数は`src/ollama_agent_loop.py`/`src/openai_agent_loop.py`
+    のように**プロセスごとに毎回新規起動**されるCLIとして呼ばれる。
+    つまりプロセスが起動した時点で`_LAST_KNOWN_HASH`は必ず"0000...0"に
+    リセットされ、比較条件`_LAST_KNOWN_HASH != "0000...0"`が常にFalseに
+    なるため、**ファイル内容がどれだけ改ざんされていても、起動直後の
+    最初の記録呼び出しでは改ざん検知コードが実質的に一度も実行されない**
+    (実機検証済み: チェーン全体を書き換えた状態で新規プロセスを起動しても
+    例外は一切発生しない)。さらに旧実装の"zk_proof"フィールドは
+    `"Verified by Anjo da máquina"`という固定文字列に過ぎず、いかなる
+    証明の生成・検証ロジックも存在しない、名前だけの「ゼロ知識証明」だった。
+
+    本修正では、プロセスの生死に依存しない恒久的な検証に変更した:
+    記録の都度、ファイルに保存されている全チェーンを先頭から鍵付きHMAC-
+    SHA256で再検証する(verify_full_chain)。これにより、どのプロセスが
+    最初に呼び出しても、ファイル自体に残る改ざんの痕跡を確実に検知できる。
+    ハッシュの入力はファイルに永続化されているフィールド
+    (previous_hash, timestamp, action)のみに限定した — 旧実装はargs/kwargsも
+    ハッシュ入力に含めていたが、それらはブロックに保存されないため、
+    そもそも後から再計算して検証することが構造的に不可能であり、ハッシュに
+    混ぜても何の改ざん耐性にも寄与していなかった(検証不能なものを
+    ハッシュに混ぜるのは、検証できる体裁を整えるだけの見せかけでしかない)。
+    "zk_proof"フィールドは誤解を招く固定文字列から、実際に計算している
+    ものを誠実に説明する注記に変更した(本機構は真のゼロ知識証明ではない)。
+    """
     FILE_NAME = "zk_audit_trail.json"
     REMOTE_LEDGER_MOCK = "remote_ledger_sync.log"
 
@@ -98,29 +158,65 @@ class ZKAuditTrail:
             f.write(f"[{block_data['timestamp']}] SYNCED HASH: {block_data['current_hash']} | ACTION: {block_data['action']}\n")
 
     @classmethod
+    def _get_key(cls) -> bytes:
+        return _load_or_create_zk_signing_key(_ZK_SIGNING_KEY_PATH)
+
+    @classmethod
+    def _compute_hmac(cls, key: bytes, previous_hash: str, timestamp_str: str, action: str) -> str:
+        raw = f"{previous_hash}|{timestamp_str}|{action}".encode('utf-8')
+        return hmac.new(key, raw, hashlib.sha256).hexdigest()
+
+    @classmethod
+    def _verify_full_chain(cls, trail: list, key: bytes) -> str:
+        """ファイルに保存されたチェーン全体を先頭から鍵付きHMACで再検証し、
+        末尾のcurrent_hashを返す。プロセスの再起動を跨いだ改ざんも検知する。"""
+        expected_prev = _GENESIS_HASH
+        for block in trail:
+            if block.get("previous_hash") != expected_prev:
+                raise LossOfAtaraxia("[記憶の欠落] ログが改ざんされました(チェーンの連続性が不正です)。")
+            recomputed = cls._compute_hmac(
+                key, block.get("previous_hash", ""), block.get("timestamp", ""), block.get("action", "")
+            )
+            if not hmac.compare_digest(recomputed, block.get("current_hash", "")):
+                raise LossOfAtaraxia("[記憶の欠落] ログが改ざんされました(鍵付きハッシュの不一致を検知)。")
+            expected_prev = block["current_hash"]
+        return expected_prev
+
+    @classmethod
     def verify_and_record(cls, func_name, *args, **kwargs):
-        global _LAST_KNOWN_HASH, _LAST_TIMESTAMP
+        global _LAST_TIMESTAMP
         current_time = datetime.utcnow()
         if current_time < _LAST_TIMESTAMP: raise LossOfAtaraxia("[時間の偽装] 過去への逆行を検知しました。")
         _LAST_TIMESTAMP = current_time
+
+        key = cls._get_key()
 
         trail = []
         if os.path.exists(cls.FILE_NAME):
             with open(cls.FILE_NAME, 'r', encoding='utf-8') as f:
                 trail = json.load(f)
-                if trail and trail[-1].get("current_hash") != _LAST_KNOWN_HASH and _LAST_KNOWN_HASH != "0000000000000000000000000000000000000000000000000000000000000000":
-                    raise LossOfAtaraxia("[記憶の欠落] ログが改ざんされました。")
-                if trail: _LAST_KNOWN_HASH = trail[-1].get("current_hash")
+
+        # [脆弱性修正 2026-10] プロセスごとのグローバル変数ではなく、
+        # ファイル内のチェーン全体を毎回先頭から検証する。
+        last_known_hash = cls._verify_full_chain(trail, key)
 
         timestamp_str = current_time.isoformat() + "Z"
-        current_hash = hashlib.sha256(f"{_LAST_KNOWN_HASH}|{timestamp_str}|{func_name}:{str(args)}:{str(kwargs)}".encode('utf-8')).hexdigest()
+        current_hash = cls._compute_hmac(key, last_known_hash, timestamp_str, func_name)
 
-        new_block = {"timestamp": timestamp_str, "action": func_name, "previous_hash": _LAST_KNOWN_HASH, "current_hash": current_hash, "zk_proof": "Verified by Anjo da máquina"}
+        new_block = {
+            "timestamp": timestamp_str,
+            "action": func_name,
+            "previous_hash": last_known_hash,
+            "current_hash": current_hash,
+            "zk_proof": (
+                "これは真のゼロ知識証明ではなく、ローカル秘密鍵(.zk_audit_signing_key)で"
+                "鍵付けしたHMAC-SHA256ハッシュ連鎖です(GRIMOIRE §AH参照)。"
+            ),
+        }
         trail.append(new_block)
 
         with open(cls.FILE_NAME, 'w', encoding='utf-8') as f: json.dump(trail, f, indent=2)
         cls.stream_to_external_ledger(new_block)
-        _LAST_KNOWN_HASH = current_hash
 
 def enforce_maquina_seal(github_id, cert_path='ataraxia_certificate.json'):
     def decorator(func):
