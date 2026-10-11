@@ -609,3 +609,17 @@ chain.record("AI_ACTION", {...})
 \*\*対応\*\*: 未使用のimport(`EvolvingAngel`)と、何もしない空の関数・エントリポイント(`execute\_kill\_chain`・`\_\_main\_\_`ブロック)を削除した。`RazielIntelligence`・`SamaelWeaponization`本体の挙動、および`src/metatron\_orchestrator.py`からの呼び出し経路は変更していない。
 
 \*\*検証\*\*: 削除後に`mini\_pytest.py`を再実行し、`PASS=134 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ、§AL時点から変化なし)であることを確認した。特に`tests/test\_metatron\_orchestrator.py`が引き続きPASSすることを確認し、`src/metatron\_orchestrator.py`からの`RazielIntelligence`・`SamaelWeaponization`の利用に影響が無いことを固定した。
+
+\### AN.
+
+\*\*発見\*\*: `angels/sandalphon\_anchor.py`(「証跡のブロックチェーン化」と称し、監査ログのロールバック・改ざんをCI上で検知する役割を持つ天使スクリプト)の検知ロジック自体は正しかったが、その前提となる「前回実行時のチェックポイント」(`sefer/.angel\_state/sandalphon\_anchor.json`)が、CIワークフロー(`.github/workflows/anjo\_da\_maquina\_protocol.yml`)上で\*\*一度も永続化されていなかった\*\*。`.angel\_state/`は`.gitignore`対象であり、かつ本ワークフロー全体を検索しても`actions/cache`・`actions/upload-artifact`・`actions/download-artifact`のいずれも一件も存在しなかった(実機確認済み)。GitHub Actionsの使い捨てランナーはジョブ終了ごとにディスクが破棄されるため、毎回チェックアウト直後は`.angel\_state/`が空の状態から始まり、`load\_state("sandalphon\_anchor")`は常に`None`を返す。結果として`main()`内の`if checkpoint:`分岐(ロールバック・改ざん検知の本体)はCI上で\*\*一度も実行されたことがなく\*\*、常に「チェックポイント無し」の初回実行として振る舞い、新しいチェックポイントを(どうせ次回には失われる)ローカルに保存して無条件にPASSを報告し続けていた。
+
+\*\*たとえ話\*\*: これは、空港の入国審査官(`sandalphon\_anchor.py`)が「前回あなたが出国したときの記録」(チェックポイント)を見て、記録と現在のパスポートの出入国印が一致するか照合する、という正しい仕事の手順を持っているのに、審査官の記憶用ノート(`.angel\_state/`)が\*\*毎回の勤務シフトの開始時に全部真っ白に消去される\*\*、という状態である。審査官は「前回の記録」を一度も参照できないため、来る人全員を「初めて来た人」として扱い、無条件に通過させてしまう。審査官の判断ロジックそのものは正しいのに、記憶が保存される仕組みが最初から存在しなかったため、この検問所は開設以来一度も「比較」という本来の仕事を実行したことがなかった。
+
+\*\*原因\*\*: `sandalphon\_anchor.py`(および同じ`load\_state`/`save\_state`パターンを使う`metatron\_commitment.py`)を実装した際、`sefer/.angel\_state/`配下への書き込みはローカル開発環境では(ファイルシステムが実行間で永続するため)正しく機能して見えたが、CI環境(実行ごとに使い捨てのランナー)での永続化手段を追加することが漏れていた。GRIMOIRE.md §AH(ZKAuditTrailのプロセスグローバルが毎回リセットされ検知が発火しない)と全く同種の「検知ロジック自体は正しいが、実行環境側の前提が一度も満たされない」という構造的な見せかけであり、本セッションを通じて繰り返し発見している「学習・記憶したつもりになっているだけ」のパターンの、CIワークフロー設定にまで及んでいた例である。なお`metatron\_commitment.py`は`report\_fail`を一切呼ばない常にPASSするログ出力ステップであり(本人のコメントにも明記されている)、セキュリティ上のゲートとして機能を偽っていたわけではないため、本件の実害は`sandalphon\_anchor.py`に限定される。
+
+\*\*対応\*\*: ワークフローに`actions/cache@v4`ステップを追加し、`sefer/.angel\_state`を対象として永続化するようにした。`actions/cache`は保存キーが既存キャッシュと完全一致するとジョブ終了時の保存自体をスキップする(更新されない)ため、保存キーには`github.run\_id`(実行ごとに一意)を用いて必ず保存を発生させ、復元時は固定プレフィックスの`restore-keys`で直前の最新チェックポイントを取得するようにした(GitHub Actions公式が推奨する「更新され続けるキャッシュ」の標準パターン)。このキャッシュステップは、`sandalphon\_anchor.py`の実行ステップより前に配置した。
+
+\*\*残存する限界(誠実に明記する)\*\*: `actions/cache`にも、7日間アクセスが無いと自動失効する等のGitHub側の制約があり、`sefer/audit\_chain.py`の鍵管理と同種の「恒久不変の外部監査サービスの代替にはならない」限界を持つ。それでも「CI上では構造的に一度も発火しない」状態から「通常の実行頻度では実際に機能する」状態への実質的な改善である。
+
+\*\*検証\*\*: `tests/test\_sandalphon\_anchor\_state\_persistence.py`を新設した。(1) ワークフローYAMLを実際にパースし、`.angel\_state`を対象とする`actions/cache`ステップが`sandalphon\_anchor.py`の実行ステップより前に存在すること、および保存キーが`github.run\_id`を含むことを固定する配線テスト2件。(2) `sandalphon\_anchor.py`の検知ロジック本体を、一時ディレクトリ上でチェックポイントが実際に存在する状態を再現して直接検証するテスト4件(ロールバック検知・改ざん検知・正常系でのチェックポイント更新・チェックポイント不在時の初回実行)。これらは本ロジックがCI上で一度も実行されたことがなかった(=一度もテストで直接検証されていなかった)ため、本修正で初めて固定した。`mini\_pytest.py`再実行で`PASS=140`(§AM時点の134から新規6件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。
