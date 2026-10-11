@@ -1,6 +1,31 @@
 ﻿"""
 src/ast_scanner.py
 ===================
+[統合判断確定 2026-10] 本モジュールはGRIMOIRE.md §Jで「未統合スタンドアロン
+デモ」として検知漏れバグのみ修正され、`src/aegis_system.py`(AI生成コードの
+実運用審査パイプライン)へ組み込むかどうかの判断は保留されたまま残っていた
+(どこからもimportされず、`tests/test_ast_scanner_qualified_calls.py`で
+単体テストされるだけの孤立モジュールだった)。本件を精査し、\*\*統合しない\*\*
+ことを確定した。理由:
+
+  本モジュールの`banned_modules = {'os', 'sys', 'shutil', 'subprocess'}`は、
+  既に`aegis_system.py`経由で実運用されているGabriel(`sefer.inquisition()`)の
+  `forbidden_modules`(pickle/ctypes/importlib/socket/urllib/requests/http/
+  subprocess/os)より広く、`sys`・`shutil`を単純importしただけで即座に拒否する。
+  `sys`単体のimportは(`sys.exit()`・`sys.argv`等)それ自体に危険性はなく、
+  本当に危険なのは`sys.settrace`等の個別関数であり、それは既にMichael
+  (`sefer.\_michael\_absolute\_defense`)がOSレベルの監査フックで個別に
+  遮断している。本モジュールをそのまま統合すると、AIが生成した無害な
+  コード(例: 単に`sys`をimportするだけのコード)まで静的解析の時点で
+  一律拒否してしまう過剰検知(false positive)を増やすだけで、Gabrielが
+  意図的にスコープを絞った設計判断(bareな`sys`/`shutil`は許容し、実際に
+  危険な個別関数呼び出しのみを狙う)と矛盾する。
+
+  したがって、実運用パイプラインへの組み込みは行わず、§Lの`cassiels_veil.py`
+  と同じ扱い(「代替の設計思想を示す教材」として、テストで固定された状態の
+  まま保持)とする。これにより、GRIMOIRE.md §Jで保留されていた統合判断を
+  本コメント追記をもって確定する。
+
 [2026-10 修正] `src/kamael_judgment.py` の `KamaelInquisitor` および
 `sefer.inquisition()`(Gabriel)で発見・修正したのと同じバグが本モジュールの
 `CognitiveScanner.visit_Call` にも存在した: `node.func` が `ast.Attribute`

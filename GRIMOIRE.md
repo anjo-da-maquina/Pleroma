@@ -495,3 +495,11 @@ chain.record("AI_ACTION", {...})
 \*\*テスト\*\*: `tests/test\_audit\_chain.py`に2件追加し、(1)鍵ファイルを持たない別インスタンスでは正規のチェーンでも検証に失敗すること、(2)§AEの核心となる「VIOLATION行の削除+鍵なしでのチェーン再計算」という具体的な攻撃手口が、修正後は検知されること、を固定した(既存の2テストも維持)。`angels/zadkiel\_astrolabe.py`を実行し、実際のCI向け検査スクリプトが新方式でも正しく動作することも確認した。`mini\_pytest.py`実行結果は`PASS=103`(新規+2)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
 
 なお、本修正によりハッシュ計算方式が変わるため、このサンドボックス環境でこれまでのテスト実行により生成されていた旧方式(無鍵SHA-256)の`sefer/audit\_chain.jsonl`(Git管理対象外のローカル専用ファイル)は、新方式では検証に失敗するようになる。実害のある本番監査ログではなく本セッションのテスト実行で生成された一時データのみだったため、削除してクリーンな状態からHMAC方式での記録を開始した。
+
+\### AF. §Jで保留されていた`src/ast\_scanner.py`の統合判断を確定(非統合・保持)
+
+ユーザーからの3度目の「更なる進化を」という依頼を受けた棚卸しの続きで、`src/aegis\_system.py`(AI生成コードの実運用審査パイプライン)が実際に何を検閲しているかを精査する過程で、`src/ast\_scanner.py`の`CognitiveScanner`が、どこからもimportされず`tests/test\_ast\_scanner\_qualified\_calls.py`で単体テストされるだけの孤立モジュールであることに気づいた。GRIMOIRE.md §Jで「検知漏れバグは修正したが、実運用パイプラインへの統合判断は保留」と記録されたまま、その後の§K・§L(他の未統合スタンドアロンデモの統合/削除判断)でも扱われずに残っていた未決事項だった。
+
+\*\*検討\*\*: 本モジュールの`banned\_modules = {'os', 'sys', 'shutil', 'subprocess'}`は、既に`aegis\_system.py`経由で実運用されているGabriel(`sefer.inquisition()`)の`forbidden\_modules`(pickle/ctypes/importlib/socket/urllib/requests/http/subprocess/os)より広く、`sys`・`shutil`の単純importだけで即座に拒否する。しかし`sys`単体のimport(`sys.exit()`・`sys.argv`等)自体には危険性がなく、本当に危険なのは`sys.settrace`等の個別関数呼び出しであり、それは既にMichael(`sefer.\_michael\_absolute\_defense`)がOSレベルの監査フックで個別に遮断している。Gabrielが意図的に`sys`/`shutil`の単純importまでは禁止対象に含めない設計になっているのは、まさにこの過剰検知を避けるための判断であり、`ast\_scanner.py`をそのまま統合すると、AIが生成した無害なコード(単に`sys`をimportするだけ等)まで一律拒否してしまう構造的な後退になる。
+
+\*\*判断\*\*: 実運用パイプラインへは統合しない。§Lの`cassiels\_veil.py`(別の設計思想を示す教材として統合せず保持)と同じ扱いとし、`src/ast\_scanner.py`のdocstringに本判断の経緯と理由を明記した。これにより、どこからもimportされない孤立モジュールが「現在も有効な防壁の一部であるかのような外観」を保ち続け、将来の開発者(あるいは別のAIセッション)を誤解させるリスクを解消した。テストファイルの削除は行わず、既存のテストカバレッジはそのまま維持する(§Lの`cassiels\_veil.py`と同様、動作検証済みの代替設計として保持する価値があるため)。`mini\_pytest.py`実行結果は変化なし(`PASS=103 XFAIL=2 FAIL=0 ERROR=2`)。
