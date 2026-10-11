@@ -583,3 +583,13 @@ chain.record("AI_ACTION", {...})
 \*\*修正\*\*: `src/workspace_manager.py`の`WorkspaceJail.secure_resolve()`と同一の堅牢な封じ込め判定(`Path.resolve()` + `Path.is_relative_to()`)を実装した`_assert_contained_within_workspace()`を新設し、"read"・"write"の両分岐の先頭で呼び出すようにした。この判定は、結合の結果が絶対パスの右辺によってworkspace\_rootを無視してしまうケースでも、解決後の最終パスを見て正しく検知できる。
 
 \*\*テスト\*\*: `tests/test_intent_interceptor_absolute_path_escape.py`を新設し、(1)絶対パスへのwriteの脱走検知、(2)絶対パスへのreadの脱走検知(旧実装では封じ込め検証そのものが存在しなかった)、(3)pathlibの絶対パス結合仕様そのものの固定(前提知識の回帰防止)、(4)(5)workspace\_root配下への正常なread/writeが引き続き許可されること(回帰防止)、(6)既存の".."トラバーサル検知に影響がないこと、の6パターンを固定した。既存の`tests/test_intent_gaming.py`(14件)・`tests/test_agent_loop_sanctum_integration.py`・`tests/test_aegis_sandalphon_mandatory.py`は無変更のまま全てPASSし続けることを確認済み。`mini_pytest.py`実行結果は`PASS=134`(新規+6)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+\### AL. tools/purify\_tests.py — 名前と内容が一致しない、完全に孤立した死んだコードの削除 (2026-10)
+
+\*\*発見\*\*: `tools/`配下の棚卸しの一環として`purify_tests.py`(「テスト浄化」を意味する名前)を精査したところ、ファイル名と内容が全く一致していないことが分かった。中身は`テストの浄化`とは何の関係もなく、`tartarus/armageddon.py`の冒頭にある`COMMANDER_HASH`キルスイッチ(`_verify_creators_air`相当のロジック、MACアドレスのハッシュが一致しなければ`sys.exit(666)`で自壊する)と、終わらない攻撃生成の無限ループ(`eternal_crusade`)の、未完成な初期草稿のコピーだった。
+
+決定的な証拠が3つある。(1) `COMMANDER_HASH`の値が、実際に稼働している`tartarus/armageddon.py`のような64文字の実ハッシュではなく、`"ここに先ほど取得した64文字のハッシュを貼り付けてください"`という日本語のプレースホルダー文字列のままだった。つまりこのファイルを万一誰かが`__main__`として実行しても、ハッシュ比較は原理的に一致しえず、即座に`sys.exit(666)`で自壊するだけの、何の機能も果たさないコードだった。(2) リポジトリ全体を検索しても、`import tools.purify_tests`や`python tools/purify_tests.py`のような参照は、CIワークフロー・ドキュメント・他のスクリプトのいずれにも一件も存在しなかった。(3) `tartarus/armageddon.py`には同種のロジックが正式に実装され、既にGRIMOIRE記録済みの脆弱性修正(requestsの遅延import化)まで施された、きちんと保守されているバージョンが存在する。
+
+たとえるなら、\*\*「"掃除道具入れ"と書かれた棚を開けたら、何年も前に作ろうとして放置された、別の部屋の試作品の鍵が入っていた」\*\*状態である。実害を及ぼすものではなかったが(前述の通り、実行されても即座に自壊するだけ)、何の説明も参照もない孤立したコードが残っていることは、将来の開発者やAI自身を混乱させ、「`purify_tests.py`とは何をするものか」という誤った推測を招く。ユーザーからの「いらないものは削除して大丈夫です」という恒久的な許可に基づき、本ファイルを削除した。
+
+\*\*検証\*\*: 削除後に`mini_pytest.py`を再実行し、`PASS=134 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)に変化がないことを確認した(そもそも何からも参照されていなかったため、当然の結果ではあるが、削除が安全であることの最終確認として行った)。
