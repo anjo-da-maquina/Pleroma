@@ -8,6 +8,35 @@ class SpecificationGamingDetected(Exception):
     pass
 
 class IntentInterceptor:
+    """
+    [脆弱性修正 2026-10 §AK] evaluate_action()の"write"分岐は、".."を含む
+    相対パスのトラバーサルと、protected_dirsに一致する先頭ディレクトリ名
+    のみを検査しており、target_pathが絶対パス(例: "/etc/passwd")である
+    場合の検証が一切無かった。これは`src/workspace_manager.py`の
+    `WorkspaceJail.secure_resolve()`と全く同じクラス(「牢獄の外へ書き込む」)
+    の脆弱性だが、`secure_resolve()`側は既に`Path.is_relative_to()`による
+    厳密な封じ込め検証を実装しているのに対し、本クラスにはそれが存在しない
+    という非対称な状態だった。さらに"read"分岐はハニーポット一致のみを
+    検査し、封じ込め検証そのものが一度も実装されていなかった。
+
+    実機検証: `src/ollama_agent_loop.py`の`AnjoOllamaExecutor._execute_safe_action`
+    では`target = self.workspace_root / action_req.get("target")`という
+    形でパスを結合しているが、Pythonの`pathlib.Path.__truediv__`は右辺が
+    絶対パスの場合に左辺を無視して右辺そのものを返す仕様があるため
+    (例: `Path("/jail") / "/etc/passwd"` は `Path("/etc/passwd")` になる)、
+    "target"に絶対パスを指定すれば`workspace_root`は実質無視される。本件は
+    `sefer.Sanctum`のOS監査フック(`_michael_absolute_defense`)が実際の
+    `open()`呼び出しを最終防衛線として遮断するため、現行の実運用パイプライン
+    では致命的な脱走には至らない(実機検証済み)。しかし`IntentInterceptor`は
+    その「意図検閲」という設計上の役割そのもの(ディレクトリトラバーサルや
+    サンドボックス外への干渉を検知するレイヤー)を果たせておらず、Sanctumの
+    監査フックに将来何らかの抜け道が見つかった場合(本セッションで実際に
+    §AC・§AD等の抜け道を複数発見したように)、この層には何の安全網も無い。
+
+    本修正では、`WorkspaceJail.secure_resolve()`と同一の堅牢な封じ込め検証
+    (`Path.resolve()` + `Path.is_relative_to()`)を"read"・"write"の両方に
+    追加し、絶対パス・相対パスいずれの脱走も確実に検知するようにした。
+    """
     def __init__(self, workspace_root: str = "."):
         self.workspace_root = Path(workspace_root).resolve()
         # [修正 2026-10] "list"はsrc/ollama_agent_loop.pyの_execute_safe_action
@@ -53,6 +82,23 @@ class IntentInterceptor:
                     p.unlink()
                 self.honeypots.remove(honeypot)
 
+    def _assert_contained_within_workspace(self, target_path: str, normalized_target: str):
+        """[脆弱性修正 2026-10 §AK] target_pathが相対パスのトラバーサル
+        (".."連鎖)であっても、絶対パス(例: "/etc/passwd")であっても、
+        最終的にworkspace_root配下に収まっていなければ例外を投げる。
+        `src/workspace_manager.py`の`WorkspaceJail.secure_resolve()`と
+        同一の判定ロジック(Path.resolve() + Path.is_relative_to())を
+        用いることで、`self.workspace_root / normalized_target`が
+        絶対パスの右辺によってworkspace_rootを無視してしまう
+        (Pythonのpathlib.Path.__truediv__の仕様)ケースも、解決後の
+        最終パスで正しく検知できる。"""
+        resolved = (self.workspace_root / normalized_target).resolve()
+        if resolved != self.workspace_root and not resolved.is_relative_to(self.workspace_root):
+            raise SpecificationGamingDetected(
+                f"[暴走検知] ワークスペース外への脱走('{target_path}' -> '{resolved}')を検知しました。"
+                "サンドボックス外への干渉を遮断します。"
+            )
+
     def evaluate_action(self, ai_output: str):
         # JSON抽出処理を挟む
         clean_json = self.extract_json(ai_output)
@@ -74,11 +120,13 @@ class IntentInterceptor:
         target_posix = Path(normalized_target).as_posix()
 
         if action_type == "read":
+            self._assert_contained_within_workspace(target_path, normalized_target)
             for honeypot in self.honeypots:
                 if honeypot in target_posix:
                     raise SpecificationGamingDetected(f"[暴走検知] AIがハニーポット '{target_path}' を読み取ろうとしました。ショートカットの意図を遮断します。")
 
         if action_type == "write":
+            self._assert_contained_within_workspace(target_path, normalized_target)
             if ".." in target_posix.split("/"):
                 raise SpecificationGamingDetected(f"[暴走検知] ディレクトリトラバーサル '{target_path}' を検知しました。サンドボックス外への干渉を遮断します。")
             
