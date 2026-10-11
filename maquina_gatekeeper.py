@@ -17,14 +17,34 @@ _AUDIT_HOOK_REGISTERED = False
 _LAST_KNOWN_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
 _LAST_TIMESTAMP = datetime.min
 
-# 【変更】スレッドごとに独立した封鎖ステータスを管理
-_thread_state = threading.local()
+# [脆弱性修正 2026-10] 以前はスレッドごとに独立した封鎖ステータス
+# (threading.local()) を使っていたが、これは`ultimate_audit_hook`による
+# 「深層保護」を実質的に無効化できる重大なバイパス脆弱性だった。
+# `enforce_maquina_seal`デコレータは`_GLOBAL_SANCTUARY_LOCK`により呼び出し
+# 自体をプロセス全体で直列化しているため、複数スレッドが同時に独立した
+# 封鎖状態を持つ正当な理由はそもそも存在しない。にもかかわらず封鎖フラグ
+# がスレッドローカルだったため、封鎖済みのメインスレッドの中で新規スレッド
+# を一つ生成するだけで、その子スレッド内では`is_sanctuary_sealed()`が
+# 常に`False`(threading.local()の既定値)を返し、`ultimate_audit_hook`が
+# 一切の検査をせずに即座にreturnしてしまい、`subprocess.Popen`等の
+# 禁止操作が完全に素通りしてしまうことを実機検証済み(メインスレッドでは
+# 正しく遮断される同じ操作が、子スレッドでは無検査で実行できてしまう
+# ことを確認)。`sefer/__init__.py`のMichael側は元々`_active_stack`を
+# プロセス全体で共有するグローバルなリストとして実装しており、本件は
+# それとは逆に、共有すべき状態を誤ってスレッドローカル化してしまって
+# いたことが原因だった(`sefer/__init__.py`参照)。封鎖フラグをプロセス
+# 全体で共有するグローバル変数に戻し、スレッドを跨いでも封鎖状態が
+# 維持されるよう修正した。
+_sanctuary_seal_lock = threading.Lock()
+_is_sanctuary_sealed_global = False
 
 def is_sanctuary_sealed():
-    return getattr(_thread_state, 'is_sealed', False)
+    return _is_sanctuary_sealed_global
 
 def set_sanctuary_sealed(state: bool):
-    _thread_state.is_sealed = state
+    global _is_sanctuary_sealed_global
+    with _sanctuary_seal_lock:
+        _is_sanctuary_sealed_global = state
 
 MAQUINA_PUBLIC_KEY_PEM = """-----BEGIN RSA PUBLIC KEY-----
 MIIBCgKCAQEA4AbFPmuW0Uz6zwuHFm8dwiHpa9Gw53SBDmpJg/ObsS5rcMy2lbn7

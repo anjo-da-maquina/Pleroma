@@ -446,3 +446,23 @@ with Sanctum(allowed_dirs=["/home/claude/pleroma/jail_workspace_repro"]):
 \*\*修正\*\*: フォールバック文字列比較から`.lower()`を除去し、大文字小文字は元の文字列のまま厳密に比較するよう修正した。パス区切り文字の正規化のみは維持した。
 
 \*\*テスト\*\*: `tests/test\_michael\_is\_path\_allowed.py`を新設し、(1)許可ディレクトリ配下への正当なアクセスの許可、(2)許可ディレクトリそのものへのアクセスの許可、(3)許可ディレクトリ外への通常のアクセスの遮断、(4)今回発見した「大文字小文字違いバイパス」(許可ディレクトリと大文字小文字が異なるだけの別の実ディレクトリ)の遮断、の4パターンを固定した。`mini\_pytest.py`実行結果は`PASS=98`(新規+4)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)で、`WorkspaceJail`・`AegisSystem`等の既存挙動が壊れていないことも確認した。
+
+\### AD. `maquina\_gatekeeper.py`の「深層保護」(`ultimate\_audit\_hook`)が、子スレッド経由で完全にバイパス可能だった脆弱性を発見・修正
+
+ユーザーからの3度目の「更なる進化を」という依頼を受けた棚卸しの続きで、`sefer/\_\_init\_\_.py`(Michael/Sanctum)の次に、ライセンス証明書ゲートである`maquina\_gatekeeper.py`を精査した結果、§AA〜§ACとは異なる種類の、より深刻な「保護層の完全な無効化」脆弱性を発見した。
+
+\*\*事実確認\*\*: `enforce\_maquina\_seal`デコレータは、証明書検証に成功すると`set\_sanctuary\_sealed(True)`で「封鎖」状態に入り、デコレータ本体の処理が終わるまでの間、`sys.addaudithook`で登録された`ultimate\_audit\_hook`が`subprocess.Popen`・`os.system`・`os.exec`等の危険操作を遮断する「深層保護」が働く設計になっていた。しかし封鎖ステータスの実体である`\_thread\_state`は`threading.local()`(スレッドごとに独立)で実装されていた。`ultimate\_audit\_hook`自身は`sys.addaudithook`によりプロセス全体(全スレッド)で呼び出されるにもかかわらず、その中の`is\_sanctuary\_sealed()`判定がスレッドローカルであるため、封鎖済みのスレッドの中で新たなスレッドを一つ生成するだけで、その子スレッドでは`is\_sanctuary\_sealed()`が常に`False`(`threading.local()`の既定値)を返し、`ultimate\_audit\_hook`が検査そのものを一切行わずに即座にreturnしてしまう。実機で以下を再現・確認した:
+
+```python
+mg.set_sanctuary_sealed(True)
+# メインスレッドでの禁止操作 → 正しく LossOfAtaraxia で遮断される
+# しかし、その"封鎖中"に生成した子スレッドの中で同じ操作を行うと:
+def evil_in_child_thread():
+    subprocess.Popen(["echo", "ESCAPED_VIA_THREAD"], ...)  # => 遮断されず実行されてしまう
+```
+
+`enforce\_maquina\_seal`デコレータは`\_GLOBAL\_SANCTUARY\_LOCK`により呼び出し自体をプロセス全体で直列化しているため、複数スレッドが同時に独立した封鎖状態を持つ正当な理由はそもそも存在しない。むしろ`sefer/\_\_init\_\_.py`側の`\_active\_stack`(Michaelの絶対防壁の状態管理)は元々プロセス全体で共有するグローバルなリストとして実装されており、本件はそれとは逆に、本来共有すべき状態を誤ってスレッドローカル化してしまっていたことが原因だった。
+
+\*\*修正\*\*: 封鎖ステータスを`threading.local()`から、ロックで保護したプロセス全体共有のグローバル変数(`\_is\_sanctuary\_sealed\_global`)に変更した。これにより、どのスレッドで封鎖しても、その封鎖状態は全スレッドから一貫して観測され、`ultimate\_audit\_hook`の検査を子スレッド経由で回避することはできなくなった。
+
+\*\*テスト\*\*: `tests/test\_thread\_safety\_maquina\_seal.py`を新設し、(1)封鎖状態が子スレッドにも共有されること、(2)封鎖中は子スレッドからの禁止操作(`subprocess.Popen`)も遮断されること、(3)封鎖していない通常時は本フックによる誤検知が起きないこと、の3パターンを固定した。本物の`rsa`パッケージがこのサンドボックス環境のegressポリシー上インストールできないため、`tests/test\_provisioning\_approval\_flow.py`と同一の疑似実装パターンで`maquina\_gatekeeper.py`の`import rsa`を満たしている(ファイル名は`test\_openai\_agent\_loop\_template.py`より辞書順で後になるよう選定し、既存の「本物のrsaが無いことによるERROR」という既知の環境起因の挙動(§U参照)に影響を与えないようにした)。`mini\_pytest.py`実行結果は`PASS=101`(新規+3)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
