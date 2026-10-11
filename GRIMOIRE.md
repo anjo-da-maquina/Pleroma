@@ -569,3 +569,17 @@ chain.record("AI_ACTION", {...})
   - `external_qa_wrapper.py`: `architecture.html`(`angels/ophanim_thousand_eyes.py`が静的に検査している対象と同一ファイル)を、実際に`Playwright`のヘッドレスChromiumでレンダリングし、(1)JavaScriptの未捕捉例外(pageerror)、(2)コンソールのerrorレベルのログ、の両方を動的に検知する。`ophanim_thousand_eyes.py`の静的解析(ファイルの中身を読むだけ)を、実際にブラウザでコードを実行する動的検証で補完する多層防御になっている。対象ファイルが存在しない場合は同様に「検査対象なし」として正直に報告する。
 
 \*\*テスト\*\*: `tests/test_adapters_excel_to_yaml_parser.py`(3件)・`tests/test_adapters_external_qa_wrapper.py`(4件)を新設した。前者は、対象ファイル不在時に偽の成功を名乗らないこと・実際のExcelファイルが正しくYAML化されること・完全に空の行が省略されることを固定。後者は、対象ファイル不在時の正直な報告・正常なHTMLの合格・意図的に埋め込んだJavaScript未捕捉例外とconsole.errorの両方が実際に検知されることを固定した(旧実装では検知不可能だったことを、実際にブラウザで実行させて確認している)。実機で`cp architecture.html`を破壊的なスクリプト付きで一時的に書き換え、実際にFAILすることを手動でも確認した上で原状復帰した。`mini_pytest.py`実行結果は`PASS=128`(新規+7)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
+
+\### AK. anjo\_interceptor/intent\_checker.py `IntentInterceptor` — 絶対パス指定による「意図検閲」層の脱走検知漏れ (2026-10)
+
+\*\*発見\*\*: `src/ollama_agent_loop.py`の実運用パイプラインを再精査した際、`AnjoOllamaExecutor._execute_safe_action`が`target = self.workspace_root / action_req.get("target")`という形でパスを結合していることに着目した。Pythonの`pathlib.Path.__truediv__`には、右辺が絶対パスの場合に左辺を無視してそのまま右辺を返すという仕様がある(例: `Path("/jail") / "/etc/passwd"` は `Path("/jail/etc/passwd")` にはならず `Path("/etc/passwd")` になる)。つまりAIが`{"action": "write", "target": "/etc/passwd", ...}`のように絶対パスを指定するだけで、`workspace_root`による境界は計算上無視される。
+
+さらに調べると、この入力が最初に通過する`IntentInterceptor.evaluate_action()`の"write"分岐は、".."連鎖の相対パストラバーサルと、`protected_dirs`に一致する先頭ディレクトリ名のみを検査しており、絶対パスそのものに対する封じ込め検証が一切無かった。"read"分岐はさらに手薄で、ハニーポットのファイル名一致以外、封じ込め検証そのものが最初から存在しなかった。たとえるなら、\*\*「入国審査(IntentInterceptor)が、パスポートの行き先欄が『国内』かどうかだけを見ていて、『海外』と書かれたパスポートをそもそも確認する欄が無かった」\*\*状態である。
+
+実機で検証した結果、幸いにも現行の実運用パイプラインでは致命的な脱走には至らない。最終防衛線である`sefer.Sanctum`のOS監査フック(`_michael_absolute_defense`)が、計算されたパスがどうであれ、実際に発行される`open()`等のシステムコールの引数(実際の絶対パス)を直接検査しているため、`workspace_root`の境界外への書き込みは実際にはそこで遮断される(実機再現コードで確認済み: `self.workspace_root / "/tmp/.../escape_test.txt"`という脆弱な結合を経由させても、`Sanctum`のコンテキスト内での書き込みは`LossOfAtaraxia`で正しく遮断された)。
+
+しかし`IntentInterceptor`自身は、その設計上の役割(ディレクトリトラバーサルやサンドボックス外への干渉を検知する「意図検閲」レイヤー)を果たせていなかった。本セッションで§AC・§AD・§AE等、`Sanctum`やその周辺の「最終防衛線」ですら複数の抜け道が実際に見つかっている以上、外側の層が内側の層の抜け道に対する安全網を一切持たない状態を放置するのは、この実装全体が掲げる「多層防御」の思想に反する。
+
+\*\*修正\*\*: `src/workspace_manager.py`の`WorkspaceJail.secure_resolve()`と同一の堅牢な封じ込め判定(`Path.resolve()` + `Path.is_relative_to()`)を実装した`_assert_contained_within_workspace()`を新設し、"read"・"write"の両分岐の先頭で呼び出すようにした。この判定は、結合の結果が絶対パスの右辺によってworkspace\_rootを無視してしまうケースでも、解決後の最終パスを見て正しく検知できる。
+
+\*\*テスト\*\*: `tests/test_intent_interceptor_absolute_path_escape.py`を新設し、(1)絶対パスへのwriteの脱走検知、(2)絶対パスへのreadの脱走検知(旧実装では封じ込め検証そのものが存在しなかった)、(3)pathlibの絶対パス結合仕様そのものの固定(前提知識の回帰防止)、(4)(5)workspace\_root配下への正常なread/writeが引き続き許可されること(回帰防止)、(6)既存の".."トラバーサル検知に影響がないこと、の6パターンを固定した。既存の`tests/test_intent_gaming.py`(14件)・`tests/test_agent_loop_sanctum_integration.py`・`tests/test_aegis_sandalphon_mandatory.py`は無変更のまま全てPASSし続けることを確認済み。`mini_pytest.py`実行結果は`PASS=134`(新規+6)`XFAIL=2 FAIL=0 ERROR=2`(既存の無関係なERROR2件のみ)。
