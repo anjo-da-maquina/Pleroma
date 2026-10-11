@@ -19,6 +19,10 @@ zk_audit_report.xml
 # .gitignoreの対象外になっており、Git管理対象として誤って追跡されていた
 # (GRIMOIRE.md §X参照)。
 sefer/audit_chain.jsonl
+# [2026-10] SignedAuditChain(sefer/audit_chain.py)がHMAC-SHA256で監査チェーンに
+# 署名するための秘密鍵。初回自動生成・0600権限で作成されるローカル専用の
+# 秘密情報であり、Gitにコミットしてはならない(GRIMOIRE.md §AE参照)。
+sefer/.audit_signing_key
 remote_ledger_sync.log
 vital_feed.sig
 fake_admin_credentials.py
