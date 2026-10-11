@@ -15,37 +15,23 @@ class LossOfAtaraxia(BaseException):
     pass
 
 def _log_violation_to_chain(event: str, details: dict):
-    log_path = Path("sefer/audit_chain.jsonl")
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    last_entry = {"index": 0, "hash": "0" * 64}
-    if log_path.exists():
-        try:
-            with open(log_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.strip():
-                        last_entry = json.loads(line)
-        except Exception:
-            pass
-
-    new_index = last_entry["index"] + 1
-    prev_hash = last_entry["hash"]
-    
-    entry = {
-        "index": new_index,
-        "timestamp": time.time(),
-        "event": event,
-        "details": {k: str(v)[:200] for k, v in details.items()},
-        "prev_hash": prev_hash
-    }
-    
-    raw = json.dumps(entry, sort_keys=True, ensure_ascii=False).encode("utf-8")
-    import hashlib
-    entry["hash"] = hashlib.sha256(raw).hexdigest()
-
+    # [脆弱性修正 2026-10] 以前はここに独自のSHA-256ハッシュ連鎖の実装を
+    # 直接持っていたが、これは秘密鍵を用いない単純なハッシュ連鎖に過ぎず、
+    # ファイルへの書き込み権限を持つ攻撃者が改ざんを検知されずに行えて
+    # しまう脆弱性があった(sefer/audit_chain.py のSignedAuditChainクラスの
+    # docstring、GRIMOIRE.md §AE参照)。また、本関数とSignedAuditChainとで
+    # 同じフォーマットのハッシュ連鎖ロジックが二重実装されており、片方だけ
+    # 修正すると両者が食い違って`verify_integrity()`が壊れるリスクもあった。
+    # 唯一の実装であるSignedAuditChain(鍵付きHMAC-SHA256版)に委譲するよう
+    # 修正した。
     try:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        from .audit_chain import SignedAuditChain
+    except ImportError:
+        # パッケージとしてではなく単体で読み込まれた場合のフォールバック。
+        from audit_chain import SignedAuditChain
+    truncated_details = {k: str(v)[:200] for k, v in details.items()}
+    try:
+        SignedAuditChain(log_path="sefer/audit_chain.jsonl").record(event, truncated_details)
     except Exception:
         pass
 
