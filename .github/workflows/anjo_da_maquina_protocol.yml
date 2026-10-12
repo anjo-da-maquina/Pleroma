@@ -170,9 +170,18 @@ jobs:
         # アノテーションは Checks API (api.github.com) 経由で取得可能で、
         # これはblob storageとは別経路のため到達できることを確認済み。
         # 動作確認後に元のシンプルな形へ戻す。
+        # [DEBUG-ONLY TEMP] GitHub Actionsのrunステップは既定で`set -e`相当
+        # (bash -eo pipefail)であるため、1行目のpythonが非ゼロ終了すると
+        # そこでスクリプト全体が即座に停止し、以降のEXIT_CODE取得・cat・
+        # アノテーション出力が一切実行されないという欠陥が最初の版にあった
+        # (実機検証でAZAZEL_DEBUGアノテーションが全く出力されないことを確認)。
+        # `|| true`で1行目の失敗を明示的に握り、以降の行を必ず実行させる。
         run: |
+          set +e
           python angels/azazel_dependency_audit.py > /tmp/azazel_debug.txt 2>&1
-          echo "EXIT_CODE=$?" >> /tmp/azazel_debug.txt
+          REAL_EXIT_CODE=$?
+          set -e
+          echo "EXIT_CODE=$REAL_EXIT_CODE" >> /tmp/azazel_debug.txt
           cat /tmp/azazel_debug.txt
           python3 -c "content = open('/tmp/azazel_debug.txt').read()[:900]; escaped = content.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A'); print('::error::AZAZEL_DEBUG ' + escaped)"
         continue-on-error: true
