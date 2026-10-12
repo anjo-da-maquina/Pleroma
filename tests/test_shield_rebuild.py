@@ -77,6 +77,49 @@ def test_promote_shield_seal_approval_flow(tmp_path, monkeypatch):
     assert pending[0]["status"] == "APPROVED"
 
 
+def test_promote_shield_seal_approves_latest_proposal_not_stale_one(tmp_path, monkeypatch):
+    """[脆弱性修正の核心] GRIMOIRE.md §AT参照。同じvulnerability_nameで
+    2回目の提案を承認した場合、1回目の(既に承認済みの)古い提案のデータ
+    ではなく、まさに今回承認した2回目の提案のデータがshield_rules.json
+    に適用されなければならない。以前の実装は`next()`で最初に見つかった
+    APPROVEDエントリ(=古い方)を誤って再適用していた。"""
+    rules_file = tmp_path / "shield_rules.json"
+    pending_file = tmp_path / "shield_rules_pending.json"
+
+    import promote_shield_seal as pss
+    monkeypatch.setattr(pss, "RULES_PATH", rules_file)
+    monkeypatch.setattr(pss, "PENDING_RULES_PATH", pending_file)
+
+    z = ZadkielDominion(rules_file=rules_file, pending_file=pending_file)
+
+    # 1回目の提案・承認: "old_danger" のみを禁止
+    z.propose_knowledge({
+        "vulnerability_name": "Recurring Vuln",
+        "dangerous_modules": ["old_mod"],
+        "dangerous_functions": ["old_danger"],
+    })
+    pss.approve("Recurring Vuln")
+
+    rules = json.loads(rules_file.read_text(encoding="utf-8"))
+    assert set(rules["blocked_functions"]) == {"old_danger"}
+
+    # 2回目の提案(同じvulnerability_name、別の内容)・承認:
+    # "new_danger" が新たに禁止されるべき(old_dangerはそのまま残っていてもよい)
+    z.propose_knowledge({
+        "vulnerability_name": "Recurring Vuln",
+        "dangerous_modules": ["new_mod"],
+        "dangerous_functions": ["new_danger"],
+    })
+    pss.approve("Recurring Vuln")
+
+    rules = json.loads(rules_file.read_text(encoding="utf-8"))
+    assert "new_danger" in rules["blocked_functions"], (
+        "2回目に承認したはずの'new_danger'がshield_rules.jsonに反映されていない"
+        "(古い1回目の提案が誤って再適用されている疑い)"
+    )
+    assert "new_mod" in rules["blocked_modules"]
+
+
 def test_kamael_inquisitor_catches_qualified_call_name():
     rules = {"blocked_modules": [], "blocked_functions": ["os.system"]}
     tree_src = "import os\nos.system('echo hacked')\n"
