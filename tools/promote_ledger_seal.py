@@ -12,7 +12,13 @@ Raziel's Ledger 承認プロモーションツール
     python tools/promote_ledger_seal.py --list          # 承認待ち一覧を表示
     python tools/promote_ledger_seal.py --approve os.popen2
     python tools/promote_ledger_seal.py --reject  os.popen2
-    python tools/promote_ledger_seal.py --approve-all    # 全件を一括承認（非推奨：必ず目視確認の上で使用すること）
+
+[2026-10 訂正] 以前のdocstringには `--approve-all`(全件一括承認)という
+オプションが「非推奨だが使用可能」として記載されていたが、実際には
+argparseの定義に一度も実装されていなかった(存在しないオプションを
+指定するとargparse自体がエラーで終了する)。このツールの存在目的は
+「人間が1件ずつ目視確認する」ことそのものであるため、一括承認機能を
+後から実装することはせず、実態に合わせてdocstringから記述を削除した。
 """
 import argparse
 import json

@@ -148,3 +148,47 @@ def test_unsealed_state_allows_normal_operation():
     p = subprocess.Popen(["echo", "ok"], stdout=subprocess.PIPE)
     out, _ = p.communicate()
     assert out.decode().strip() == "ok"
+
+
+def test_get_machine_id_is_not_a_constant_placeholder_on_linux():
+    """[脆弱性修正の核心] GRIMOIRE.md §AS参照。以前の実装はWindows以外の
+    プラットフォーム(本サンドボックスのLinuxを含む)では、ホストの識別
+    情報を一切含まない固定文字列"UNKNOWN_MACHINE_ID"を無条件に返していた。
+    本テストは実環境(Linux)で実際に/etc/machine-id由来の値が返ることを
+    直接確認する(モックではなく、実機での動作そのものを固定する)。"""
+    import platform
+    from pathlib import Path
+
+    if platform.system() != "Linux":
+        return  # このテストはLinux環境でのみ意味を持つ(CI/サンドボックスはLinux)
+
+    machine_id = mg.get_machine_id()
+    assert machine_id != "UNKNOWN_MACHINE_ID", (
+        "Linux上でget_machine_id()が固定のプレースホルダーを返している"
+        "(修正前の欠陥が再発している)"
+    )
+    for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+        if candidate.exists():
+            assert machine_id == candidate.read_text(encoding="utf-8").strip()
+            break
+    else:
+        raise AssertionError("どちらのmachine-idファイルも存在しない環境でのテストは想定外です")
+
+
+def test_hardware_fingerprint_differs_between_different_machine_ids(monkeypatch):
+    """[回帰防止] get_absolute_hardware_fingerprint()は、get_machine_id()の
+    戻り値が異なれば異なる指紋を算出すること(個体識別として機能している
+    ことの最低限の確認)。"""
+    monkeypatch.setattr(mg, "get_machine_id", lambda: "machine-aaaa")
+    fp1 = mg.get_absolute_hardware_fingerprint()
+    monkeypatch.setattr(mg, "get_machine_id", lambda: "machine-bbbb")
+    fp2 = mg.get_absolute_hardware_fingerprint()
+    assert fp1 != fp2, "異なるマシンIDから同一の指紋が算出されている"
+
+
+def test_get_machine_id_falls_back_to_documented_constant_on_unsupported_platform(monkeypatch):
+    """[回帰防止] Windows/Linux/macOSのいずれでもない(未対応の)プラット
+    フォームでは、既存の文書化された限界どおり固定文字列にフォールバック
+    すること(この挙動自体は正常であり、検知対象ではない)。"""
+    monkeypatch.setattr(mg.platform, "system", lambda: "SomeExoticOS")
+    assert mg.get_machine_id() == "UNKNOWN_MACHINE_ID"
