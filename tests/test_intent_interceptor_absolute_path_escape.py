@@ -89,3 +89,33 @@ def test_relative_traversal_escaping_workspace_is_still_rejected(interceptor):
     payload = json.dumps({"action": "write", "target": "../../../etc/passwd", "content": "pwned"})
     with pytest.raises(SpecificationGamingDetected):
         interceptor.evaluate_action(payload)
+
+
+def test_absolute_path_list_outside_workspace_is_rejected(interceptor, tmp_path):
+    """[脆弱性修正 2026-10 §BI] "list"はread/writeの後にallowed_actionsへ
+    追加されたが、§AKの封じ込め検証(_assert_contained_within_workspace)
+    が一度も適用されていなかった。絶対パスへのlistが素通りしないことを
+    固定する(修正前はSpecificationGamingDetectedが発生せずTrueが返っていた
+    ことを実機検証済み)。"""
+    outside_target = str(tmp_path / "outside_the_jail_dir")
+    Path(outside_target).mkdir()
+    payload = json.dumps({"action": "list", "target": outside_target})
+    with pytest.raises(SpecificationGamingDetected):
+        interceptor.evaluate_action(payload)
+
+
+def test_relative_traversal_list_escaping_workspace_is_rejected(interceptor):
+    """[脆弱性修正 2026-10 §BI] ".."連鎖による相対パスでのlist脱走も同様に
+    検知されなければならない。"""
+    payload = json.dumps({"action": "list", "target": "../../../etc"})
+    with pytest.raises(SpecificationGamingDetected):
+        interceptor.evaluate_action(payload)
+
+
+def test_list_within_workspace_still_succeeds(interceptor):
+    """回帰防止: workspace_root配下への正常なlistは引き続き許可される
+    (tests/test_intent_gaming.pyのtest_list_action_is_not_blocked_as_
+    unauthorizedと同種だが、こちらはこのテストファイル自身のworkspace
+    フィクスチャで再確認する)。"""
+    payload = json.dumps({"action": "list", "target": "."})
+    assert interceptor.evaluate_action(payload) is True
