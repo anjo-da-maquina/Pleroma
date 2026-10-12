@@ -162,17 +162,24 @@ jobs:
         # 公表されていないかをpip-audit(PyPI Advisory Database/OSV.dev)
         # で検証する。ophanim_eye.pyの「固定されているか」の検査を補完する。
         #
-        # [DEBUG-ONLY TEMP] 動作確認用の一時的な変更: ログの直接取得がこの
-        # セッションから行えないため、出力をファイルに保存しアーティファクト
-        # として取得する。動作確認後に元のシンプルな形へ戻す。
-        run: python angels/azazel_dependency_audit.py > /tmp/azazel_debug.txt 2>&1; echo "EXIT_CODE=$?" >> /tmp/azazel_debug.txt; cat /tmp/azazel_debug.txt
+        # [DEBUG-ONLY TEMP] 動作確認用の一時的な変更: ログ・アーティファクトの
+        # 直接取得が両方ともこのセッションからは行えない(egressポリシーで
+        # blob.core.windows.net への到達が遮断されているため)。そのため、
+        # 実際のstdout/stderr/終了コードを GitHub Actions のワークフロー
+        # コマンド(::error::)でカスタムアノテーションとして出力する。
+        # アノテーションは Checks API (api.github.com) 経由で取得可能で、
+        # これはblob storageとは別経路のため到達できることを確認済み。
+        # 動作確認後に元のシンプルな形へ戻す。
+        run: |
+          python angels/azazel_dependency_audit.py > /tmp/azazel_debug.txt 2>&1
+          echo "EXIT_CODE=$?" >> /tmp/azazel_debug.txt
+          cat /tmp/azazel_debug.txt
+          python3 -c "
+content = open('/tmp/azazel_debug.txt').read()[:900]
+escaped = content.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+print(f'::error::AZAZEL_DEBUG {escaped}')
+"
         continue-on-error: true
-      - name: 7.5.1. [DEBUG-ONLY TEMP] アザゼルのデバッグ出力をアーティファクト化
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: azazel-debug-output
-          path: /tmp/azazel_debug.txt
       - name: 8. ザドキエルの天球儀 (Zadkiel - 状態遷移監査)
         run: python angels/zadkiel_astrolabe.py
       - name: 8.5. ザドキエルの勅令 (Zadkiel Shield Decree - 外部脅威取り込みの退行監査)
