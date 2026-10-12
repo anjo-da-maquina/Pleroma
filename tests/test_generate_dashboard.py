@@ -61,6 +61,28 @@ def test_dashboard_renders_summary_cards_from_real_looking_data(tmp_path: Path):
     assert "テスト用キュー" in html
 
 
+def test_dashboard_displays_the_average_qa_score_it_computes(tmp_path: Path):
+    """[脆弱性修正 2026-10 §BE] avg_qaはこれまで集計されるだけで、HTML出力の
+    どこにも表示されていなかった(作りかけの機能)。QAスコア10点・5点の2戦績
+    なら平均は7.5のはずで、これがHTML中のどこかに実際に出力されることを
+    固定する(修正前のコードに対して本テストが失敗することをgit stashで
+    確認済み)。"""
+    akashic_path = tmp_path / "akashic_records.json"
+    _write_json(akashic_path, [
+        {"generation": 1, "status": "Breached", "qa_score": 10, "timestamp": "t1", "qa_hint": "h1"},
+        {"generation": 2, "status": "Failed", "qa_score": 5, "timestamp": "t2", "qa_hint": "h2"},
+    ])
+
+    html = build_dashboard(
+        akashic_path=akashic_path,
+        audit_chain_path=tmp_path / "does_not_exist.jsonl",
+        ledger_path=tmp_path / "does_not_exist2.json",
+        pending_paths={"空キュー": tmp_path / "does_not_exist3.json"},
+    )
+
+    assert "7.5" in html, "平均QAスコア(7.5)がHTML出力のどこにも現れていません。"
+
+
 def test_dashboard_handles_missing_files_gracefully(tmp_path: Path):
     """すべてのデータファイルが存在しない(初回実行等)場合でも例外を出さずに生成できる"""
     html = build_dashboard(
