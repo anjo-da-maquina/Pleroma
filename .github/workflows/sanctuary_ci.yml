@@ -26,9 +26,20 @@ jobs:
       # が原因で創造主ゲートのテストが ModuleNotFoundError でクラッシュして
       # いた)。requirements.txt を単一の正として読み込むことで、このズレを
       # 構造的に防ぐ。
+      #
+      # [再発 2026-10 §AP] 上記の教訓があったにもかかわらず、その後
+      # tests/配下に PyYAML(yaml)・openpyxl を必要とするテストを追加した際、
+      # requirements.txt への追記が再び漏れた。これは
+      # `.github/workflows/anjo_da_maquina_protocol.yml`(別のワークフロー)
+      # 側で `pip install ... pyyaml ... openpyxl ...` が既に行われていた
+      # ため、そちらで動作確認したテストがこのワークフローでも通ると誤って
+      # 前提してしまったことが原因である。本ワークフローは
+      # requirements.txtのみを単一の正として使うため、他のワークフローの
+      # インストール内容はここには一切反映されない。GRIMOIRE.md §AP参照。
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        playwright install chromium --with-deps
 
     - name: Execute Sanctuary Verification
       run: |
