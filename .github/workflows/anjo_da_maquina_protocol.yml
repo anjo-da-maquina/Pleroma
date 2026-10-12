@@ -156,6 +156,12 @@ jobs:
         run: python angels/michael_sword.py
       - name: 7. オファニムの瞳 (Ophanim - 資格継承監査)
         run: python angels/ophanim_eye.py
+      - name: 7.5. アザゼルの禁断知識 (Azazel - サプライチェーン既知脆弱性監査)
+        # [新設 2026-10] requirements.txtの各依存が、バージョン固定(==)
+        # されているだけでなく、その固定された版自体に既知の脆弱性(CVE)が
+        # 公表されていないかをpip-audit(PyPI Advisory Database/OSV.dev)
+        # で検証する。ophanim_eye.pyの「固定されているか」の検査を補完する。
+        run: python angels/azazel_dependency_audit.py
       - name: 8. ザドキエルの天球儀 (Zadkiel - 状態遷移監査)
         run: python angels/zadkiel_astrolabe.py
       - name: 8.5. ザドキエルの勅令 (Zadkiel Shield Decree - 外部脅威取り込みの退行監査)
