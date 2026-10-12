@@ -16,10 +16,19 @@ armageddon.py 側に残しており、本分離によってゲートが弱まる
 """
 import json
 import re
+import sys
 from pathlib import Path
 from datetime import datetime
 
 TARTARUS_DIR = Path(__file__).parent.resolve()
+PLEROMA_DIR_FOR_IMPORT = TARTARUS_DIR.parent
+if str(PLEROMA_DIR_FOR_IMPORT) not in sys.path:
+    sys.path.insert(0, str(PLEROMA_DIR_FOR_IMPORT))
+# [脆弱性修正 2026-10 §BJ] sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTS(詳細は
+# sefer/__init__.py側のコメント参照)を単一の正として再利用する。ここで
+# 独自に同じ集合を複製すると、将来sefer側だけが更新され本ファイルが
+# 取り残される(GRIMOIRE.md §Mと同種の)ドリフトのリスクを生むため。
+from sefer import ALWAYS_PASSTHROUGH_AUDIT_EVENTS
 PLEROMA_DIR = TARTARUS_DIR.parent
 LEDGER_PATH = PLEROMA_DIR / "sefer" / "raziel_ledger.json"
 PENDING_LEDGER_PATH = PLEROMA_DIR / "sefer" / "raziel_ledger_pending.json"
@@ -129,11 +138,40 @@ def validate_banned_event(banned_event: str):
     """
     LLM(Metatron)が提案した禁止イベント名の妥当性を検証する純粋関数。
     戻り値: (is_valid: bool, reason: str)
+
+    [脆弱性修正 2026-10 §BJ] 以前は`CRITICAL_INFRASTRUCTURE`(自己免疫疾患
+    ガード)に含まれない限り、形式(VALID_EVENT_NAME_RE)が妥当なら無条件で
+    有効と判定していた。しかし`sefer._michael_absolute_defense`は、
+    `sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTS`に含まれるイベント名
+    (例: "socket.getaddrinfo")を、ソケット検査・デフォルト拒否のいずれの
+    分岐でも常に無条件で`pass`して`return`する設計になっている。つまり
+    これらのイベント名は`sefer/raziel_ledger.json`の"banned_events"に
+    どれだけ追加しても、Razielの動的台帳のenforcement(関数の最後の分岐)
+    自体に到達する前に必ず許可されてしまい、*絶対に*禁止できない。
+
+    `CRITICAL_INFRASTRUCTURE`は「誤って禁止するとシステムが壊れる」もの
+    (open・exec等)を防ぐガードであり、この新しいガードとは目的が異なる:
+    こちらは「禁止しても壊れないが、承認しても一切効果が無い(=人間の
+    承認作業が完全に無駄になり、かつ『もう守られている』という誤った
+    安心感を与える)」イベント名を事前に拒否するものである。
+
+    実機検証済み: 修正前は`validate_banned_event("socket.getaddrinfo")`が
+    有効と判定し、人間が`tools/promote_ledger_seal.py --approve
+    socket.getaddrinfo`で承認して`raziel_ledger.json`に反映した後も、
+    実際に`socket.getaddrinfo`を呼び出すと何の例外も発生せず素通りする
+    ことを確認した(GRIMOIRE.md §BJ参照)。
     """
     banned_event = (banned_event or "").strip("'`\" \n")
 
     if banned_event in CRITICAL_INFRASTRUCTURE:
         return False, f"Core infrastructure '{banned_event}' cannot be banned (self-immunity guard)."
+
+    if banned_event in ALWAYS_PASSTHROUGH_AUDIT_EVENTS:
+        return False, (
+            f"'{banned_event}' is unconditionally allowed by sefer's own always-passthrough "
+            "list and can never actually be enforced via Raziel's Ledger, no matter how many "
+            "humans approve it (illusory-protection guard)."
+        )
 
     if not banned_event or not VALID_EVENT_NAME_RE.match(banned_event):
         return False, f"'{banned_event}' is not a well-formed audit event name (anti-hallucination guard)."

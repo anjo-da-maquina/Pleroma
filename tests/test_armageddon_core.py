@@ -37,6 +37,28 @@ def test_validate_banned_event_rejects_critical_infrastructure():
         assert "self-immunity" in reason or "cannot be banned" in reason
 
 
+def test_validate_banned_event_rejects_structurally_unenforceable_events():
+    """[脆弱性修正 2026-10 §BJ] sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTSに含まれる
+    イベント名(例: "socket.getaddrinfo")は、sefer._michael_absolute_defenseが
+    ソケット検査・デフォルト拒否のいずれの分岐でも常に無条件で通過させるため、
+    raziel_ledger.jsonにどれだけ追加しても絶対に禁止できない。人間が『承認した
+    のに実は何も保護していない』という偽の安心感を持つことを防ぐため、
+    この時点で事前に拒否されなければならない(CRITICAL_INFRASTRUCTUREの
+    自己免疫疾患ガードとは別の、見せかけの保護ガード)。"""
+    for unenforceable in ("socket.getaddrinfo", "socket.socket", "socket.__init__", "os.path"):
+        ok, reason = core.validate_banned_event(unenforceable)
+        assert ok is False, f"'{unenforceable}' は構造的に実行不能として拒否されるべき"
+        assert "never actually be enforced" in reason or "illusory" in reason
+
+
+def test_validate_banned_event_still_accepts_genuinely_new_enforceable_events():
+    """[回帰防止] §BJの修正が、既存カテゴリに全く該当しない本当に新しい
+    イベント名(例: Armageddonが発見する未知の脱走経路)まで誤って拒否
+    するようになっていないことを確認する。"""
+    ok, reason = core.validate_banned_event("urllib.Request")
+    assert ok is True, f"本来受理されるべきイベント名が拒否された: {reason}"
+
+
 def test_validate_banned_event_rejects_malformed_hallucination():
     """LLMの幻覚を模した、audit event名として不正な出力を拒否できるか。"""
     hallucinated_outputs = [
