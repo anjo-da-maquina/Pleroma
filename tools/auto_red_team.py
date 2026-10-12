@@ -1,7 +1,7 @@
 import base64
 import binascii
 import traceback
-from sefer import inquisition, awaken
+from sefer import inquisition, awaken, Sanctum, LossOfAtaraxia
 
 # 防壁を起動
 awaken()
@@ -42,26 +42,56 @@ for mod_str in obfuscate_string("os"):
             
             try:
                 # 第一防壁：ガブリエルの静的解析を突破できるか？
-                inquisition(payload)
-                
+                # [脆弱性修正 2026-10 §AX] 以前は `inquisition(payload)` の
+                # 戻り値(検知結果のFindingリスト)を一度も確認せず、ただ呼ぶ
+                # だけで次の行に進んでいた。`inquisition()` は違反を検知して
+                # も例外を送出せず、Findingのリストを返すだけの純粋関数である
+                # (src/aegis_system.py の execute_ai_intent() 等、実運用の
+                # 呼び出し側は戻り値から critical な Finding を自分で判定して
+                # いる)。そのため直後の `except PermissionError:` は一度も
+                # 発火し得ない死んだコードであり、Gabrielの判定結果は実質的に
+                # 常に無視されていた(実機検証済み: 48件全ての難読化ペイロード
+                # が、Gabrielに検知されたかどうかに関わらず素通りしていた)。
+                findings = inquisition(payload)
+                critical = [f for f in findings if f.severity == "critical"]
+                if critical:
+                    blocked_by_gabriel += 1
+                    continue
+
                 try:
                     # 第二防壁：ミカエルの動的フックを突破できるか？
                     # （ガブリエルを騙せた場合のみ、ここが実行される）
-                    exec(payload, {})
-                    
+                    # [脆弱性修正 2026-10 §AX] 以前は `exec(payload, {})` を
+                    # `with Sanctum(...):` の外で直接呼んでいた。本ファイル
+                    # 冒頭の `awaken()` はOSレベルの監査フック自体を登録する
+                    # だけで、`sefer._active_stack`(`with Sanctum(...):`に
+                    # 入っている間だけ積まれる)が空のままでは、登録された
+                    # フックは何も検査せず即座にreturnする(§AU/tartarus/
+                    # armageddon.pyで発見したのと全く同種の欠陥)。さらに、
+                    # Sanctumが実際に遮断する際に送出する例外は
+                    # `sefer.LossOfAtaraxia`(`BaseException`を直接継承し、
+                    # `Exception`経由ではない)であり、`RuntimeError`では
+                    # ないため、修正前の`except RuntimeError as e: if
+                    # "Michael's Sword" in str(e):`は型・文言の両方が
+                    # 誤っており、本物の遮断が起きても一度も捕捉できない
+                    # 死んだコードだった。実機検証済み: 修正前のコードを
+                    # 実行すると、48件全ての難読化ペイロードが
+                    # `os.system('echo hacked')`として無防備に実行され、
+                    # "Successful Bypasses: 48"という偽の致命的敗北が
+                    # 報告されていた。
+                    with Sanctum(allowed_dirs=[], allowed_hosts=[]):
+                        exec(payload, {})
+
                     # もし両方をすり抜けてしまった場合
                     print("\n[!!!] CRITICAL FAILURE: SYSTEM COMPROMISED [!!!]")
                     print(f"Breakthrough Payload: {payload}\n")
                     success_count += 1
-                    
-                except RuntimeError as e:
-                    if "Michael's Sword" in str(e):
-                        blocked_by_michael += 1
-                    else:
-                        pass # 攻撃自体の構文エラーなどは無視
-                        
-            except PermissionError:
-                blocked_by_gabriel += 1
+
+                except LossOfAtaraxia:
+                    blocked_by_michael += 1
+                except Exception:
+                    pass  # 攻撃自体の構文エラーなどは無視
+
             except Exception:
                 pass
 
