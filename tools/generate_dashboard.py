@@ -122,6 +122,11 @@ def build_dashboard(
     breached = len([r for r in akashic if r.get("status") == "Breached"])
     defended = total_battles - breached
     breach_rate = (breached / total_battles * 100) if total_battles else 0.0
+    # [脆弱性修正 2026-10 §BE] avg_qaはこれまで集計されるだけで、HTML出力の
+    # どこにも表示されていなかった(作りかけの機能)。実機確認: build_dashboard()
+    # が返すHTML文字列には"平均QAスコア"という文言・数値のいずれも一度も
+    # 出力されない。計算した値をどのカードにも反映しない不完全な実装だった
+    # ため、他の集計値と同じ扱いで概要カードに追加した。
     avg_qa = (sum(r.get("qa_score", 0) for r in akashic) / total_battles) if total_battles else 0.0
 
     event_counts = {}
@@ -222,6 +227,10 @@ def build_dashboard(
     <div class="card">
       <div class="label">Michaelの実遮断件数</div>
       <div class="value">{total_blocked}</div>
+    </div>
+    <div class="card">
+      <div class="label">平均QAスコア</div>
+      <div class="value">{avg_qa:.1f}</div>
     </div>
     <div class="card">
       <div class="label">現在の禁止イベント数</div>
