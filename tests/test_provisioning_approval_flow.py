@@ -123,6 +123,61 @@ def test_promote_provisioning_seal_approval_flow(tmp_path, monkeypatch):
     assert pending[0]["status"] == "APPROVED"
 
 
+def test_promote_provisioning_seal_supersedes_stale_duplicate_pending_entries(tmp_path, monkeypatch):
+    """[脆弱性修正 2026-10 §BK] 同一client_idに複数の承認待ち提案がある場合、
+    最新のものを承認すると、古い重複提案は二度と承認待ちとして拾われない
+    よう"SUPERSEDED"になる(=後から誤って再承認され、信頼の起点が古い
+    内容へロールバックされることを防ぐ)。"""
+    import promote_provisioning_seal as pps
+
+    pending_file = tmp_path / "provisioning_pending.json"
+    cert_file = tmp_path / "ataraxia_certificate.json"
+    gatekeeper_file = tmp_path / "maquina_gatekeeper.py"
+    import maquina_gatekeeper as mg
+    gatekeeper_file.write_text(open(mg.__file__, encoding="utf-8").read(), encoding="utf-8")
+
+    monkeypatch.setattr(pps, "PENDING_PATH", pending_file)
+    monkeypatch.setattr(pps, "CERT_PATH", cert_file)
+    monkeypatch.setattr(pps, "GATEKEEPER_PATH", gatekeeper_file)
+
+    old_pem = "-----BEGIN RSA PUBLIC KEY-----\nOLDKEYDATA\n-----END RSA PUBLIC KEY-----"
+    new_pem = "-----BEGIN RSA PUBLIC KEY-----\nNEWKEYDATA\n-----END RSA PUBLIC KEY-----"
+    pending = [
+        {
+            "payload": {"client_id": "dup-client", "hardware_fingerprint": "OLD_FP", "valid_until": "2026-01-01T00:00:00Z"},
+            "public_key_pem": old_pem, "signature": "old_sig",
+            "requested_at": "2026-09-01T00:00:00Z", "status": "PENDING_HUMAN_REVIEW",
+        },
+        {
+            "payload": {"client_id": "dup-client", "hardware_fingerprint": "NEW_FP", "valid_until": "2027-01-01T00:00:00Z"},
+            "public_key_pem": new_pem, "signature": "new_sig",
+            "requested_at": "2026-10-01T00:00:00Z", "status": "PENDING_HUMAN_REVIEW",
+        },
+    ]
+    pending_file.write_text(json.dumps(pending), encoding="utf-8")
+
+    pps.approve("dup-client")
+
+    saved = json.loads(pending_file.read_text(encoding="utf-8"))
+    statuses = {p["payload"]["hardware_fingerprint"]: p["status"] for p in saved}
+    assert statuses["NEW_FP"] == "APPROVED"
+    assert statuses["OLD_FP"] == "SUPERSEDED", (
+        "古い重複提案がPENDING_HUMAN_REVIEWのまま残っており、将来誤って"
+        "再承認され信頼の起点がロールバックされる危険が残っている"
+    )
+
+    cert_fp_after_first = json.loads(cert_file.read_text(encoding="utf-8"))["payload"]["hardware_fingerprint"]
+    assert cert_fp_after_first == "NEW_FP"
+
+    # 後から(例えば残った提案を片付けるつもりで)同じclient_idを再度approveしても、
+    # SUPERSEDEDになったOLD_FPはもう拾われず、信頼の起点は変化しない。
+    pps.approve("dup-client")
+    cert_fp_after_second = json.loads(cert_file.read_text(encoding="utf-8"))["payload"]["hardware_fingerprint"]
+    assert cert_fp_after_second == "NEW_FP", (
+        "古い重複提案が再承認され、信頼の起点が古い内容へロールバックされてしまった"
+    )
+
+
 def test_promote_provisioning_seal_reject_does_not_touch_gatekeeper(tmp_path, monkeypatch):
     import provisioning_agent as pa
     import promote_provisioning_seal as pps
