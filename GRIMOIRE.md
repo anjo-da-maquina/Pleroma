@@ -859,3 +859,19 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 \*\*検証\*\*: `tests/test_adversarial_evolution_sanctum_execution.py`を新設し、4件追加した。(1)・(2) 前提確認として、`open().write()`バイパスがGabriel・IntentInterceptorの双方を無傷で通過することを固定。(3) 修正の核心として、同じペイロードを`execute_payload_under_sanctum()`に通すと`LossOfAtaraxia`が発生し、実際にファイルが作成されないことを確認(`git stash`で旧コードに対して`ImportError`で失敗することも確認済み)。(4) 回帰防止として、ファイルI/O・外部接続を一切行わない本当に無害なコード(`x = 1 + 1`)は正常に完了すること(過剰検知になっていないこと)を確認した。`mini_pytest.py`再実行で`PASS=181`(§BA時点の177から新規4件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。
 
 \*\*残存する限界\*\*: 本修正は`AegisSystem.execute_ai_intent()`単体のバイパス(Gabriel/IntentInterceptorの検知漏れ)を補うものではなく、既に§AYで確認済みの通り、Gabriel/IntentInterceptor単体の静的解析には引き続き限界が残る。本修正が固定するのは「その限界があっても、本スクリプトの最終判定が実際のMichaelの実行結果を経るようになった」という、このシミュレーション自身の報告の正確性のみである。
+
+\### BC. `angels/metatron_scripture_seal.py`・`raguel_template.py`・`sandalphon_decree.py`・`zadkiel_shield_decree.py` — ロジックは正しいが、4本ともCIワークフローに一度も配線されていなかった (2026-10)
+
+\*\*発見\*\*: `src/`・`tools/`・`adapters/`の棚卸しの一環で、`tools/build_public_scripture.py`(経典=公開配布物のビルド検査ツール)を精査した際、GRIMOIRE.mdの既存記述(§「ライセンス証明書機構の公開配布からの分離」)が「`angels/metatron_scripture_seal.py`がこの配線を静的に検証する」と述べていることに気づいた。しかし実際に`grep -rl metatron_scripture_seal . --include="*.py" --include="*.yml" --include="*.md"`で確認したところ、ヒットしたのはGRIMOIRE.md自身の解説文だけであり、`.github/workflows/`配下のどのワークフローファイルのrun:ステップからも、COMMANDS.mdからも、他のどのスクリプトからも一度も呼び出されていなかった。
+
+この発見を一般化し、`angels/`配下の全スクリプトが実際にCIワークフローのrun:ステップから呼び出されているかを機械的に検証する回帰テスト(`tests/test_angels_scripts_wired_into_ci.py`)を新設して実行したところ、同じ「配線漏れ」が他に3件見つかった: `raguel_template.py`(`src/openai_agent_loop.py`拡張テンプレートの防壁統合監査)、`sandalphon_decree.py`(Docker強制サンドボックス化の退行監査)、`zadkiel_shield_decree.py`(外部脅威インテリジェンス取り込み・`angelic_shield.py`/`kamael_judgment.py`の退行監査)。4本とも、単独実行すれば正しく`PASS`を返す、ロジック自体に欠陥のない検査スクリプトだった(実機確認済み)。
+
+\*\*たとえ話\*\*: これは、警備会社が「カメラAの映像を監視する担当者」「カメラBの映像を監視する担当者」をきちんと配置し、それぞれの担当者は仕事をきちんとできる訓練を受けているにもかかわらず、実際にはカメラA・Bそのものの電源ケーブルが一度もコンセントに差されておらず、映像が一度もモニターに表示されていなかった、という状態である。見張り役(ロジック)は優秀でも、見張り台(CIワークフロー)に一度も立たせていなければ、何も見張っていない。
+
+\*\*原因\*\*: この4本は、いずれも過去の特定の脆弱性修正(ライセンス証明書機構の分離、openai_agent_loopテンプレートの修正、Dockerサンドボックス強制化、angelic_shield/kamael_judgmentの再構築)の「再発防止用の回帰検査」として、修正そのものと一緒に新設されたものと見られる。しかし修正コミットの中で、スクリプト本体の作成とGRIMOIRE.mdへの記述は行われたものの、`.github/workflows/anjo_da_maquina_protocol.yml`への`run:`ステップの追加が漏れていた。本セッションでこれまで発見してきた「ロジックは正しいが実行環境側の前提が整っていない」系の欠陥(§AH・§AN)とは異なり、今回は実行環境の前提の問題ではなく、CIワークフロー自体にステップとして存在しないという、より根本的な配線漏れだった。
+
+\*\*対応\*\*: 4本すべてを`.github/workflows/anjo_da_maquina_protocol.yml`に追加した。既存の番号付け規則に合わせ、`zadkiel_shield_decree.py`はステップ8(Zadkiel)の直後に8.5として、`raguel_template.py`はステップ12(Raguel)の直後に12.5として、`metatron_scripture_seal.py`はステップ14(Sariel)の直後に14.5として、`sandalphon_decree.py`はステップ20(Sandalphon)の直後に20.5として、それぞれ主題的に関連する既存ステップのそばに配置した。追加前に4本とも実際に単独実行して`PASS`することを確認してから配線した(配線した瞬間にCIを壊さないための確認)。
+
+さらに、この種の配線漏れが将来別のスクリプトで再発しても機械的に検知できるよう、`tests/test_angels_scripts_wired_into_ci.py`を新設した。`angels/`配下の全`*.py`ファイル(`_common.py`を除く)が、`.github/workflows/`配下のいずれかのワークフローファイルの`run:`ステップから`yaml.safe_load`による構造的解析(§AOと同じ、コメント等への文字列残存だけでは一致しない方式)で実際に呼び出されていることを検証する。
+
+\*\*検証\*\*: `tests/test_angels_scripts_wired_into_ci.py`を新設し、2件追加した。(1) 汎用テストとして、全天使スクリプトがいずれかのワークフローから参照されていることを確認(修正前のワークフローに対して`git stash`で実行すると、本件の4ファイルに加えて今回追加した`metatron_scripture_seal.py`自身も含めた不一致を正しく検出することを確認済み)。(2) 具体例として、`metatron_scripture_seal.py`が名指しで配線されていることを確認。`mini_pytest.py`再実行で`PASS=183`(§BB時点の181から新規2件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。既存の`angels/alpha_omega_guard.py`(ワークフロー構造監査)・`tests/test_alpha_omega_guard_structural_check.py`も引き続き正常にPASSすることを確認し、ワークフローYAML自体が`yaml.safe_load`で問題なく解析できることも確認した。
