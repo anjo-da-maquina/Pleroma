@@ -107,6 +107,15 @@ jobs:
         run: python angels/ophanim_eye.py
       - name: 8. ザドキエルの天球儀 (Zadkiel - 状態遷移監査)
         run: python angels/zadkiel_astrolabe.py
+      - name: 8.5. ザドキエルの勅令 (Zadkiel Shield Decree - 外部脅威取り込みの退行監査)
+        # [脆弱性修正 2026-10 §BC] angels/metatron_scripture_seal.pyと同じ
+        # 「配線漏れ」が本ファイルにも存在していた。ロジック自体は正しく
+        # (shield_rules_pendingの人間承認キュー・APIキー即時消去・完全修飾
+        # 名照合を静的検証する)、実機でも単独実行すればPASSするが、どの
+        # ワークフローのrun:ステップからも一度も呼び出されていなかった
+        # (grep -rl zadkiel_shield_decree でこのファイル以外に一件もヒット
+        # しないことを確認済み)。
+        run: python angels/zadkiel_shield_decree.py
       - name: 9. カマエルの盾 (Camael - ペイロード防御監査)
         run: python angels/camael_shield.py
       - name: 10. ジョフィエルの鏡 (Jophiel - 意味論的ドリフト監査)
@@ -115,10 +124,33 @@ jobs:
         run: python angels/gabriel_canary.py
       - name: 12. ラグエルの天秤 (Raguel - 物理空間監査)
         run: python angels/raguel_scale.py
+      - name: 12.5. ラグエルの鑑定 (Raguel's Template Audit - 拡張テンプレート防壁統合監査)
+        # [脆弱性修正 2026-10 §BC] 同種の配線漏れ。src/openai_agent_loop.py
+        # (拡張用テンプレート)がSanctum/AegisSystemの実防壁統合を保った
+        # ままであることを検証するスクリプトが、CIワークフローに一度も
+        # 追加されていなかった。
+        run: python angels/raguel_template.py
       - name: 13. ラジエルの書 (Raziel - スマートコントラクト鑑定)
         run: python angels/raziel_auditor.py
       - name: 14. サリエルの裏切り (Sariel - 外部ツール偽装監査)
         run: python angels/sariel_fallen_auditor.py
+      - name: 14.5. メタトロンの経典印章 (Metatron Scripture Seal - 公開配布境界監査)
+        # [脆弱性修正 2026-10 §BC] このステップは以前、CIワークフローに一度も
+        # 追加されていなかった。angels/metatron_scripture_seal.pyというスクリプト
+        # 自体は実在し、「ライセンス証明書機構(maquina_gatekeeper)の公開配布
+        # からの分離」をpyproject.toml・MANIFEST.in・sefer/*.pyの静的import解析
+        # という3点で検証する正しいロジックを持っていたが、どのワークフロー
+        # ファイルのrun:ステップからも一度も呼び出されておらず、COMMANDS.md・
+        # README等にも一切言及が無く、GRIMOIRE.mdの解説文の中だけに存在する
+        # 「配線されていない天使」だった(実機検証: `grep -rl
+        # metatron_scripture_seal`でGRIMOIRE.md以外に一件もヒットしないことを
+        # 確認した)。実際のsdistビルドによる内容検査(tools/build_public_scripture.py・
+        # tests/test_public_scripture_isolation.py)は別途pytest経由でCI
+        # (.github/workflows/sanctuary_ci.yml)に組み込まれているため配布物
+        # そのものの安全性は守られていたが、本スクリプトが担う「設定ファイル
+        # 自体が将来静かに後退していないか」という、より早期・軽量な静的検証
+        # 層が実質無効化されていた。
+        run: python angels/metatron_scripture_seal.py
       - name: 15. 聖域 (Sanctuary - デプロイ許可)
         if: success()
         run: echo "すべての静的・暗号論的監査を通過しました。"
@@ -142,6 +174,13 @@ jobs:
       - name: 20. サンダルフォンの響 (Sandalphon - 監査証跡監査)
         if: success()
         run: python angels/sandalphon_echo.py
+      - name: 20.5. サンダルフォンの勅令 (Sandalphon Decree - Docker強制サンドボックス化の退行監査)
+        # [脆弱性修正 2026-10 §BC] 同種の配線漏れ。AegisSystemのDocker隔離
+        # 結界(Sandalphon)が、既定でフェイルクローズドな強制のまま実運用
+        # ループに統合され続けているかを静的検証するスクリプトが、CI
+        # ワークフローに一度も追加されていなかった。
+        if: success()
+        run: python angels/sandalphon_decree.py
       - name: 21. 大天使の玉璽 (Sanctuary Manifest - 品質保証一覧出力)
         if: success()
         run: python angels/sanctuary_manifest.py
