@@ -174,11 +174,7 @@ jobs:
           python angels/azazel_dependency_audit.py > /tmp/azazel_debug.txt 2>&1
           echo "EXIT_CODE=$?" >> /tmp/azazel_debug.txt
           cat /tmp/azazel_debug.txt
-          python3 -c "
-content = open('/tmp/azazel_debug.txt').read()[:900]
-escaped = content.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-print(f'::error::AZAZEL_DEBUG {escaped}')
-"
+          python3 -c "content = open('/tmp/azazel_debug.txt').read()[:900]; escaped = content.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A'); print('::error::AZAZEL_DEBUG ' + escaped)"
         continue-on-error: true
       - name: 8. ザドキエルの天球儀 (Zadkiel - 状態遷移監査)
         run: python angels/zadkiel_astrolabe.py
