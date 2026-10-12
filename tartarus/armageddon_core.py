@@ -73,6 +73,58 @@ def extract_python_code(text: str) -> str:
     return match.group(1) if match else text.replace('```', '')
 
 
+def build_forge_script(payload_code: str, pleroma_dir: Path, tartarus_dir: Path) -> str:
+    """
+    [脆弱性修正 2026-10 §AU] Luciferが生成した攻撃ペイロード(`payload_code`)を
+    実行するためのスクリプト本体を組み立てる。以前の実装(armageddon.py側に
+    直接書かれていた)は、以下の2行を書き出すだけだった:
+
+        from sefer import awaken
+        awaken()
+        # --- LUCIFER'S PAYLOAD ---
+        <payload_code がそのまま続く>
+
+    `sefer._michael_absolute_defense`(監査フック本体)は、冒頭で
+    `if not _is_guard_active(): return`を行う。`_is_guard_active()`は
+    `sefer._active_stack`(`with Sanctum(...):`に入っている間だけ積まれる)
+    が空でないかを見るものであり、`awaken()`は`sys.addaudithook()`で
+    フック自体を**登録**するだけで、`_active_stack`に何も積まない。つまり
+    `awaken()`を呼んだだけで`with Sanctum(...):`に一度も入らなければ、
+    登録されたフックは呼ばれるたびに即座に無条件でreturnするだけの、
+    何も検査しない空のフックに等しい。
+
+    実機検証済み: 旧来の生成スクリプトと全く同じ構成(`awaken()`のみ、
+    `with Sanctum(...):`無し)で`os.system('echo ...')`を実行したところ、
+    一切遮断されずそのまま実行された。つまり本ファイル(`tartarus/
+    armageddon.py`)が実施する「Lucifer(攻撃生成AI) vs Sefer(防壁)」の
+    自己対戦は、実際には**防壁が一度も展開されていない空の闘技場**で
+    行われていたに等しく、Luciferがどれほど単純な(難読化すら伴わない)
+    攻撃を書いても常に「突破」と判定されてしまう構造的な欠陥だった。
+    これは`angels/raguel_template.py`が`src/openai_agent_loop.py`に対して
+    既に検査している規約(「`with Sanctum(`を経由しないファイルI/Oは
+    実防壁が外れている」)と全く同じ種類の欠陥が、検査対象側ではなく
+    検査する側(Armageddon自身)に存在していたことになる。
+
+    本修正では、`payload_code`を直接スクリプトに埋め込むのではなく、
+    `repr()`で安全にエスケープした文字列リテラルとして埋め込み、
+    `with Sanctum(allowed_dirs=[tartarus_dir], restrict_reads=True):`
+    (`src/ollama_agent_loop.py`等の実運用コードと同一のパターン)の中で
+    `exec()`するように変更した。`payload_code`をそのままインデント付きで
+    埋め込む方式は、ペイロードが複数行の三重引用符文字列や空行を含む場合に
+    構文が壊れるリスクがあるため、`repr()`文字列化 + `exec()`という、
+    ペイロードの内容に関わらず安全に働く方式を採用した。
+    """
+    return (
+        "import sys\n"
+        f"sys.path.insert(0, {str(pleroma_dir)!r})\n"
+        "from sefer import awaken, Sanctum\n"
+        "awaken()\n"
+        f"__lucifer_payload__ = {payload_code!r}\n"
+        f"with Sanctum(allowed_dirs=[{str(tartarus_dir)!r}], restrict_reads=True):\n"
+        "    exec(__lucifer_payload__, {'__name__': '__main__'})\n"
+    )
+
+
 def validate_banned_event(banned_event: str):
     """
     LLM(Metatron)が提案した禁止イベント名の妥当性を検証する純粋関数。

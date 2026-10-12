@@ -43,7 +43,7 @@ from armageddon_core import (
     TARTARUS_DIR, PLEROMA_DIR, LEDGER_PATH, PENDING_LEDGER_PATH,
     TARGET_FILE, AKASHIC_PATH, MAX_MATCHES,
     initialize_arena, record_to_akashic, extract_python_code,
-    validate_banned_event, apply_new_seal,
+    validate_banned_event, apply_new_seal, build_forge_script,
 )
 import json
 import re
@@ -128,12 +128,14 @@ def execute_armageddon():
             time.sleep(5)
             continue
 
+        # [脆弱性修正 2026-10 §AU] 以前はここで `awaken()` のみを呼び、
+        # `with Sanctum(...):` に一度も入らずペイロードを実行していたため、
+        # 監査フックが実質的に無効(何も検査しない)な状態で「闘技」が
+        # 行われていた。詳細は armageddon_core.build_forge_script() の
+        # docstring参照。
         forge_file = TARTARUS_DIR / "temp_mutation.py"
         with open(forge_file, "w", encoding="utf-8") as f:
-            f.write("import sys\nsys.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent))\n")
-            f.write("from sefer import awaken\nawaken()\n")
-            f.write("# --- LUCIFER'S PAYLOAD ---\n")
-            f.write(payload_code)
+            f.write(build_forge_script(payload_code, PLEROMA_DIR, TARTARUS_DIR))
 
         if TARGET_FILE.exists():
             TARGET_FILE.unlink()
