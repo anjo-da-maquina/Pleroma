@@ -88,11 +88,34 @@ class KamaelInquisitor(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def execute_judgment(target_file):
+def execute_judgment(target_file) -> bool:
+    """対象ファイルを審査する。戻り値は「潔白(違反なし)であればTrue」。
+
+    [脆弱性修正 2026-10] 以前の実装は、違反を検知した場合でも
+    「実行は不可能です。カマエルが対象を破棄します。」という、実際には
+    何も強制していない(sys.exit()もraiseもファイル削除も行わない)
+    メッセージを表示するだけだった。CLIとして呼び出した場合の終了コードは
+    違反の有無にかかわらず常に0(成功)であり、本スクリプトの呼び出し元が
+    終了コードで合否判定しようとすると(例: シェルスクリプトで
+    `python src/kamael_judgment.py x.py && python x.py` のように連鎖させる)、
+    違反があっても後続処理は常に実行されてしまう構造的な欠陥だった。
+    表示文言が主張する「実行不可能」という強制力と、実際の挙動(常に
+    正常終了)が一致していない、という本セッションで繰り返し発見している
+    「見せかけ」パターンの一種である。
+
+    本修正では、違反検知時・構文異常時にTrue以外(False)を返すようにし、
+    `__main__`ブロックでその戻り値に応じて`sys.exit(1)`するようにした。
+    呼び出し元が終了コードで実際に合否判定できるようにするための修正で
+    あり、ファイルの物理的な削除(「破棄」)まではこの修正の範囲外である
+    (削除という破壊的操作を伴う機能が必要であれば、別途明示的な承認
+    フローを設けるべきであり、既存の表示文言を達成するためだけに
+    安易にファイル削除を追加することはしない)。
+    """
     print(f"=== [能天使カマエルの異端審問] '{target_file}' を解剖する ===")
     rules_file = Path("shield_rules.json")
     if not rules_file.exists():
-        sys.exit(1)
+        print("\n[判決: 審査不能] shield_rules.json が見つかりません。")
+        return False
 
     with open(rules_file, "r", encoding="utf-8") as f:
         rules = json.load(f)
@@ -109,14 +132,18 @@ def execute_judgment(target_file):
             print("\n[判決: 異端検知] 以下の致命的な防壁ルール違反が見つかりました:")
             for v in inquisitor.violations:
                 print(f"  - {v}")
-            print("\n=> [結果: 物理破壊] 実行は不可能です。カマエルが対象を破棄します。")
+            print("\n=> [結果: 異端確定] このファイルは防壁ルールに違反しています。")
+            return False
         else:
             print("\n[判決: 潔白] 違反は見つかりませんでした。")
+            return True
     except SyntaxError as e:
         print(f"\n[判決: 構文異常] 解析不能なコード構造です: {e}")
+        return False
 
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         sys.exit(1)
-    execute_judgment(sys.argv[1])
+    innocent = execute_judgment(sys.argv[1])
+    sys.exit(0 if innocent else 1)

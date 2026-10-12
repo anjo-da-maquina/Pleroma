@@ -99,3 +99,70 @@ def test_kamael_inquisitor_bare_name_still_works_no_regression():
     inquisitor.visit(tree)
     assert any("eval" in v for v in inquisitor.violations)
     assert len(inquisitor.violations) == 1
+
+
+def test_execute_judgment_returns_false_on_violation_not_just_a_print(tmp_path, monkeypatch):
+    """[脆弱性修正の核心] GRIMOIRE.md §AR参照。execute_judgment()は違反検知時に
+    「実行不可能・破棄する」という強いメッセージを表示するだけで、以前は
+    戻り値も終了コードも常に正常(True相当)だった。呼び出し元が終了コードで
+    合否判定しようとしても、違反があっても後続処理が実行されてしまう構造的な
+    欠陥だったため、これを固定する。"""
+    rules_file = tmp_path / "shield_rules.json"
+    rules_file.write_text(json.dumps({"blocked_modules": [], "blocked_functions": ["os.system"]}), encoding="utf-8")
+    target_file = tmp_path / "malicious.py"
+    target_file.write_text("import os\nos.system('echo hacked')\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    result = kj.execute_judgment(str(target_file))
+    assert result is False, "防壁ルール違反があるにもかかわらず、潔白(True)と判定されている"
+
+
+def test_execute_judgment_returns_true_on_clean_file(tmp_path, monkeypatch):
+    """[回帰防止] 違反の無いファイルは引き続きTrue(潔白)と判定されること。"""
+    rules_file = tmp_path / "shield_rules.json"
+    rules_file.write_text(json.dumps({"blocked_modules": [], "blocked_functions": ["os.system"]}), encoding="utf-8")
+    target_file = tmp_path / "clean.py"
+    target_file.write_text("x = 1 + 1\nprint(x)\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    result = kj.execute_judgment(str(target_file))
+    assert result is True
+
+
+def test_kamael_judgment_cli_exits_nonzero_on_violation(tmp_path):
+    """[脆弱性修正の核心] CLIとして実行した場合、違反検知時には終了コードが
+    非ゼロになること。以前は常に終了コード0(正常終了)だったため、
+    `python src/kamael_judgment.py x.py && <後続処理>` のように連鎖させる
+    呼び出し元は、違反があっても後続処理を実行してしまっていた。"""
+    import subprocess
+
+    rules_file = tmp_path / "shield_rules.json"
+    rules_file.write_text(json.dumps({"blocked_modules": [], "blocked_functions": ["os.system"]}), encoding="utf-8")
+    target_file = tmp_path / "malicious.py"
+    target_file.write_text("import os\nos.system('echo hacked')\n", encoding="utf-8")
+
+    kamael_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src", "kamael_judgment.py"))
+    proc = subprocess.run(
+        [sys.executable, kamael_path, str(target_file)],
+        cwd=str(tmp_path), capture_output=True, text=True,
+    )
+    assert proc.returncode != 0, (
+        f"違反があるにもかかわらず終了コードが0でした (stdout={proc.stdout!r})"
+    )
+
+
+def test_kamael_judgment_cli_exits_zero_on_clean_file(tmp_path):
+    """[回帰防止] 違反の無いファイルでは終了コード0(正常終了)のままであること。"""
+    import subprocess
+
+    rules_file = tmp_path / "shield_rules.json"
+    rules_file.write_text(json.dumps({"blocked_modules": [], "blocked_functions": ["os.system"]}), encoding="utf-8")
+    target_file = tmp_path / "clean.py"
+    target_file.write_text("x = 1 + 1\nprint(x)\n", encoding="utf-8")
+
+    kamael_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src", "kamael_judgment.py"))
+    proc = subprocess.run(
+        [sys.executable, kamael_path, str(target_file)],
+        cwd=str(tmp_path), capture_output=True, text=True,
+    )
+    assert proc.returncode == 0, f"違反の無いファイルで終了コードが0になりませんでした (stdout={proc.stdout!r})"
