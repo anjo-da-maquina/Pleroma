@@ -51,6 +51,24 @@ class Sanctum:
                          デフォルトは False（既存動作との後方互換のため）。
                          [脆弱性修正 2026-10] 以前は読み取りが完全に無制限だった。
         """
+        # [脆弱性修正 2026-10 §AV] 以前は、子スコープの`allowed_dirs`絞り込みに
+        # `any(d == pd or d.is_relative_to(pd) for pd in parent_dirs) or
+        #  any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)` という、
+        # 二つの条件をORで結合した判定を使っていた。前半(`d`が`pd`の配下)は
+        # 正しい「子は親の範囲内にしか narrow できない」判定だが、後半
+        # (`pd`が`d`の配下、つまり`d`が`pd`の\*\*祖先\*\*)は、子が親の
+        # ディレクトリより\*\*広い\*\*祖先ディレクトリを指定した場合にも
+        # 真になってしまう。例えば親が`allowed_dirs=["jail_workspace"]`で
+        # ネストした子が`allowed_dirs=["/"]`を指定すると、"/"は
+        # "jail_workspace"の祖先(あらゆる絶対パスの祖先は"/")であるため
+        # 後半の条件が真になり、子の`allowed_dirs`が`["/"]`(ファイル
+        # システム全体)に\*\*昇格\*\*してしまう重大な脱獄脆弱性だった。
+        # 実機検証済み: `with Sanctum(allowed_dirs=["jail_workspace"]):`の
+        # 内側で`with Sanctum(allowed_dirs=["/"]):`を開き、`/tmp/`配下への
+        # 書き込みが実際に成功することを確認した。ネストしたSanctumは
+        # 「親より狭くすることしかできない」のが設計意図であるべきなので、
+        # 後半の祖先方向の判定を削除し、前半(子は親の配下でなければ
+        # 棄却される)のみを残した。
         new_dirs = [Path(d).resolve() for d in (allowed_dirs or [])]
         new_hosts = set(allowed_hosts or [])
 
@@ -60,8 +78,7 @@ class Sanctum:
                 parent_dirs = parent["allowed_dirs"]
                 self.allowed_dirs = [
                     d for d in new_dirs
-                    if any(d == pd or d.is_relative_to(pd) for pd in parent_dirs) or
-                       any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)
+                    if any(d == pd or d.is_relative_to(pd) for pd in parent_dirs)
                 ]
             else:
                 self.allowed_dirs = parent["allowed_dirs"]
