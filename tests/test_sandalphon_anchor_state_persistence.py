@@ -25,6 +25,7 @@ import contextlib
 import importlib
 import io
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -35,6 +36,7 @@ ROOT = Path(__file__).parent.parent
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "anjo_da_maquina_protocol.yml"
 
 sys.path.insert(0, str(ROOT / "angels"))
+sys.path.insert(0, str(ROOT / "sefer"))
 
 
 def test_ci_workflow_caches_angel_state_before_sandalphon_anchor_runs():
@@ -66,6 +68,53 @@ def test_ci_workflow_caches_angel_state_before_sandalphon_anchor_runs():
     assert cache_step_index < anchor_step_index, (
         "actions/cache ステップが sandalphon_anchor.py の実行より後に配置されています。"
         "復元が実行後になり、チェックポイントの検証に無意味です。"
+    )
+
+
+def test_cache_also_persists_the_signing_key_and_the_chain_itself():
+    """[脆弱性修正 2026-10 §BF/核心] §ANで追加したactions/cacheは
+    sefer/.angel_state(チェックポイント)のみを対象としており、原因は
+    2段階重なっていた。
+
+    (1) チェックポイントのハッシュの計算に使われた署名鍵
+    (sefer/audit_chain.pyのSignedAuditChainが使うsefer/.audit_signing_key、
+    未キャッシュなら実行ごとにos.urandom(32)で新規生成される)がキャッシュ
+    対象に含まれていなかった。
+
+    (2) (1)を直しても、sefer/audit_chain.jsonl自体がキャッシュされず
+    実行ごとに空から作り直される限り、各エントリのハッシュ計算対象に
+    含まれる`timestamp`(record()呼び出し時の実時刻)が実行ごとに異なる
+    ため、鍵を揃えても前回実行のチェックポイントとは原理的に一致しない。
+
+    実機検証: 一時ディレクトリで複数回のCI実行を模倣するスクリプトで、
+    鍵のみキャッシュした場合は2回目以降も必ず失敗し続けること、鍵と
+    audit_chain.jsonl本体の両方をキャッシュした場合は2回目・3回目以降も
+    正しくPASSし続けることの両方を確認した。キャッシュ対象のpathに
+    sefer/.audit_signing_key・sefer/audit_chain.jsonlの両方が含まれていな
+    ければ、この回帰は将来も再発し得る。"""
+    with open(WORKFLOW_PATH, "r", encoding="utf-8") as f:
+        workflow = yaml.safe_load(f)
+
+    steps = workflow["jobs"]["angelic-audit"]["steps"]
+    cache_steps = [
+        s for s in steps
+        if str(s.get("uses", "")).startswith("actions/cache@")
+        and ".angel_state" in str(s.get("with", {}).get("path", ""))
+    ]
+    assert len(cache_steps) == 1
+    cache_path = str(cache_steps[0]["with"]["path"])
+    assert ".audit_signing_key" in cache_path, (
+        "actions/cache の path に sefer/.audit_signing_key が含まれていません。"
+        "署名鍵がキャッシュされないと、実行ごとに鍵が変わり、キャッシュされた"
+        "前回のチェックポイントのハッシュと必ず不一致になり、2回目以降の"
+        "実行が偽の改ざん検知で毎回失敗します。"
+    )
+    assert "audit_chain.jsonl" in cache_path, (
+        "actions/cache の path に sefer/audit_chain.jsonl が含まれていません。"
+        "監査証跡本体がキャッシュされず実行ごとに作り直される限り、各エントリ"
+        "のハッシュに含まれるtimestampが実行ごとに異なるため、署名鍵を揃えて"
+        "も前回のチェックポイントとは原理的に一致せず、2回目以降の実行が"
+        "偽の改ざん検知で毎回失敗します。"
     )
 
 
@@ -202,6 +251,65 @@ def test_no_rollback_passes_and_saves_new_checkpoint(anchor_env):
 
     updated = load_state("sandalphon_anchor")
     assert updated == {"index": 2, "hash": "b" * 64}
+
+
+def test_three_simulated_ci_runs_with_the_fixed_cache_set_never_false_positive(tmp_path, monkeypatch):
+    """[脆弱性修正 2026-10 §BF/機能面の回帰防止] YAMLの構造だけでなく、実際の
+    ロジックでも「鍵+チェーン本体+チェックポイントを一緒にキャッシュして
+    持続させれば、使い捨てランナーを模した複数回の独立したプロセス実行でも
+    誤検知しない」ことを直接固定する。audit_chain.jsonl・.audit_signing_key・
+    .angel_stateの3つをキャッシュ対象と同じ扱いで次の"実行"に引き継ぐ場合、
+    何度実行しても誤って"巻き戻し・改ざんの疑い"を報告してはならない。"""
+    import importlib
+    import _common as common_mod
+
+    def simulate_one_ci_run(run_dir: Path):
+        """1回分の"CI実行"(フレッシュなPythonプロセスを模してモジュールを
+        明示的にROOTへ向け直す)。sefer/audit_chain.jsonl・
+        sefer/.audit_signing_key・sefer/.angel_state のいずれも、呼び出し元が
+        前回の内容をrun_dir配下に事前コピーしておけば、それがそのまま
+        "キャッシュから復元された状態"に相当する。"""
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "sefer").mkdir(exist_ok=True)
+
+        import audit_chain as audit_chain_mod
+        importlib.reload(audit_chain_mod)
+        chain = audit_chain_mod.SignedAuditChain(log_path=str(run_dir / "sefer" / "audit_chain.jsonl"))
+        chain.record("test_event_a", {"x": 1})
+        chain.record("test_event_b", {"x": 2})
+
+        monkeypatch.setattr(common_mod, "STATE_DIR", run_dir / "sefer" / ".angel_state")
+        (run_dir / "sefer" / ".angel_state").mkdir(parents=True, exist_ok=True)
+
+        import sandalphon_anchor as anchor_mod
+        importlib.reload(anchor_mod)
+        monkeypatch.setattr(anchor_mod, "ROOT", run_dir)
+        monkeypatch.setattr(anchor_mod, "load_state", common_mod.load_state)
+        monkeypatch.setattr(anchor_mod, "save_state", common_mod.save_state)
+        return _run_main_capturing_stdout(anchor_mod)
+
+    def carry_cache_forward(src: Path, dst: Path):
+        """actions/cacheのsave→restoreに相当: 3つの対象を次の"実行"用
+        ディレクトリへそのままコピーする。"""
+        dst.mkdir(parents=True, exist_ok=True)
+        (dst / "sefer").mkdir(exist_ok=True)
+        shutil.copytree(src / "sefer" / ".angel_state", dst / "sefer" / ".angel_state")
+        shutil.copy(src / "sefer" / ".audit_signing_key", dst / "sefer" / ".audit_signing_key")
+        shutil.copy(src / "sefer" / "audit_chain.jsonl", dst / "sefer" / "audit_chain.jsonl")
+
+    run1 = tmp_path / "run1"
+    exit_code, _ = simulate_one_ci_run(run1)
+    assert exit_code is None, "1回目の実行自体が失敗しました(前提が狂っています)。"
+
+    run2 = tmp_path / "run2"
+    carry_cache_forward(run1, run2)
+    exit_code, output = simulate_one_ci_run(run2)
+    assert exit_code is None, f"2回目の実行で偽の改ざん検知が発生しました: {output}"
+
+    run3 = tmp_path / "run3"
+    carry_cache_forward(run2, run3)
+    exit_code, output = simulate_one_ci_run(run3)
+    assert exit_code is None, f"3回目の実行で偽の改ざん検知が発生しました: {output}"
 
 
 def test_first_run_with_no_prior_checkpoint_passes_without_checking(anchor_env):
