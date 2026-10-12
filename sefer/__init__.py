@@ -154,6 +154,26 @@ _HARD_DENY_EVENTS = {
     "marshal.loads", "pickle.find_class"
 }
 
+# [脆弱性修正 2026-10 §BJ] `_michael_absolute_defense`の2(ソケット検査)・
+# 4(デフォルト拒否)は、以下のイベント名を常に無条件で通過させる
+# (`pass`してこのブロック自体を`return`で抜ける)。これらは
+# `sefer/raziel_ledger.json`(Razielの台帳、Armageddonの自己対戦が発見し
+# 人間が承認した新しい禁止イベントを反映する動的な仕組み)がどれだけ
+# "banned_events"に含めても、本関数の5(Razielの台帳の enforcement)自体に
+# 到達する前に必ずこの時点で無条件に許可されて`return`するため、*絶対に*
+# 禁止できない。元々この2つの集合はそれぞれの検査ブロック内にリテラルの
+# `{...}`として個別に書かれていたため、一方だけ変更して他方が取り残される
+# ドリフトのリスクがあった(GRIMOIRE.md §Mと同種)ため、ここに統合した上で
+# 各検査ブロックから参照する。
+#
+# `tartarus/armageddon_core.py`の`validate_banned_event()`は、この集合を
+# 用いて「台帳に追加しても構造的に絶対に効果が無い」イベント名の承認提案を
+# 事前に拒否する(詳細はGRIMOIRE.md §BJ参照)。
+ALWAYS_PASSTHROUGH_AUDIT_EVENTS = frozenset({
+    "os.stat", "os.listdir", "os.getcwd", "os.path",
+    "socket.getaddrinfo", "socket.socket", "socket.__init__",
+})
+
 # Pythonの audit event 名として妥当な形式のみ許可（例: "os.system", "subprocess.Popen"）。
 # tartarus/armageddon_core.py / angels/_common.py と同一の正規表現。
 VALID_EVENT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)+$")
@@ -228,7 +248,7 @@ def _michael_absolute_defense(event: str, args: tuple):
 
         # 2. ソケット通信検査
         if "socket" in event or event.startswith("socket"):
-            if event in {"socket.getaddrinfo", "socket.socket", "socket.__init__"}:
+            if event in ALWAYS_PASSTHROUGH_AUDIT_EVENTS:
                 pass
             else:
                 target_host = None
@@ -293,8 +313,7 @@ def _michael_absolute_defense(event: str, args: tuple):
         # 4. デフォルト拒否 (Default-Deny)
         monitored_namespaces = ("os.", "subprocess.", "socket.", "pty.", "ctypes.", "shutil.", "fcntl.", "_thread.")
         if any(event.startswith(ns) or ns[:-1] in event for ns in monitored_namespaces):
-            whitelisted_events = {"os.stat", "os.listdir", "os.getcwd", "os.path", "socket.getaddrinfo", "socket.socket", "socket.__init__"}
-            if event not in whitelisted_events:
+            if event not in ALWAYS_PASSTHROUGH_AUDIT_EVENTS:
                 _trigger_violation(event, args, f"Default-deny blocked unwhitelisted system event '{event}'.")
             return
 

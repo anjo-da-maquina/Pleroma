@@ -136,6 +136,23 @@ def test_shield_rules_unrelated_same_named_function_is_not_flagged(tmp_path, mon
     )
 
 
+def test_always_passthrough_events_really_are_unenforceable_via_ledger(tmp_path, monkeypatch):
+    """[脆弱性修正 2026-10 §BJ] sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTSに含まれる
+    イベント名は、raziel_ledger.jsonにどれだけ追加しても実際に遮断されない
+    ことを実機で固定する(tartarus/armageddon_core.pyのvalidate_banned_event()
+    がこの集合を参照して事前に提案自体を拒否するようになった根拠)。"""
+    ledger_path = tmp_path / "raziel_ledger.json"
+    with open(ledger_path, "w", encoding="utf-8") as f:
+        json.dump({"banned_events": list(sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTS)}, f)
+    _point_raziel_ledger_at(monkeypatch, ledger_path)
+
+    base = tmp_path / "jail_workspace"
+    base.mkdir()
+    with sefer.Sanctum(allowed_dirs=[str(base)]):
+        for event in sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTS:
+            sys.audit(event, "dummy_arg")  # 例外が出なければ(=禁止できていない)成功
+
+
 def test_shield_rules_missing_file_does_not_break_inquisition(tmp_path, monkeypatch):
     """shield_rules.jsonが存在しない場合でも、既存の静的解析結果に影響を
     与えてはならない(フェイルセーフ・既存挙動の維持)。"""
