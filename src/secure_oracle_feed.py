@@ -4,6 +4,7 @@ import json
 import re
 import ollama
 import time
+import datetime
 from pathlib import Path
 
 try:
@@ -20,17 +21,63 @@ except ModuleNotFoundError:
     sys.exit(1)
 
 class EconomicDefenseLimiter:
-    """【法則2: 経済的ダメージの防止（リミッター）】"""
+    """【法則2: 経済的ダメージの防止（リミッター）】
+
+    [脆弱性修正 2026-10] 以前の実装は `current_requests` をインスタンスの
+    メモリ上の変数としてのみ保持していた。これは「日次(daily)上限」を
+    名乗っているにもかかわらず、実際には「このプロセス1回の実行あたりの
+    上限」でしかなく、スクリプトを(手動・cron・CIいずれであれ)再実行
+    するたびにカウントが0から再始動する、という構造的欠陥だった。
+    GRIMOIRE.md §AH(ZKAuditTrail)・§AN(sandalphon_anchor)と同種の
+    「プロセスグローバル/インスタンス変数が実行ごとにリセットされ、
+    名乗っている保護が実質的に機能しない」パターンである。
+
+    本修正では、カウントを `sefer/.angel_state/oracle_feed_quota.json`
+    (UTC日付キー)に永続化し、プロセスをまたいで実際に「1日あたり」の
+    上限を強制するようにした。
+
+    [残存する限界(誠実に明記する)] これは単一ホスト上のファイルベースの
+    カウンタであり、複数プロセスからの並行呼び出しに対する排他制御
+    (ファイルロック)は行っていない(本スクリプトは人間が手動で単発実行
+    する運用を想定しており、同時並行実行される設計ではないため、実用上の
+    優先度は低いと判断したが、将来の拡張点として明記する)。また、
+    システム時刻やこの状態ファイル自体を書き換えられる権限を持つ攻撃者
+    には、この防壁は無力である。
+    """
+    STATE_PATH = Path(__file__).resolve().parent.parent / "sefer" / ".angel_state" / "oracle_feed_quota.json"
+
     def __init__(self, max_daily_requests=3, cooldown_seconds=5):
         self.max_requests = max_daily_requests
         self.cooldown = cooldown_seconds
-        self.current_requests = 0
+
+    def _today_key(self) -> str:
+        return datetime.datetime.utcnow().strftime("%Y-%m-%d")
+
+    def _load_count_for_today(self) -> int:
+        today = self._today_key()
+        if not self.STATE_PATH.exists():
+            return 0
+        try:
+            with open(self.STATE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return 0
+        if data.get("date") != today:
+            return 0
+        return int(data.get("count", 0))
+
+    def _save_count_for_today(self, count: int):
+        self.STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.STATE_PATH, "w", encoding="utf-8") as f:
+            json.dump({"date": self._today_key(), "count": count}, f, indent=2)
 
     def wait_and_check(self):
-        if self.current_requests >= self.max_requests:
-            raise SystemExit("[経済防壁: 遮断] 規定のAPIリクエスト上限に達しました。システムの暴走を停止します。")
-        self.current_requests += 1
-        print(f"[システム] APIレートリミット保護のため {self.cooldown}秒 待機します... (現在 {self.current_requests}/{self.max_requests} 回)")
+        current = self._load_count_for_today()
+        if current >= self.max_requests:
+            raise SystemExit("[経済防壁: 遮断] 規定の日次APIリクエスト上限に達しました。システムの暴走を停止します。")
+        current += 1
+        self._save_count_for_today(current)
+        print(f"[システム] APIレートリミット保護のため {self.cooldown}秒 待機します... (本日 {current}/{self.max_requests} 回)")
         time.sleep(self.cooldown)
 
 class SecureOracleFeed:
