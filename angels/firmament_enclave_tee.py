@@ -38,6 +38,18 @@ def scan_for_hardcoded_sensitive_env_keys(root: Path = None, self_path: Path = N
     ようにし、tests/test_firmament_enclave_tee.py が一時ディレクトリ上の
     架空のファイル構成で検証できるようにしている。既定ではリポジトリ
     本体のROOTと本ファイル自身を使う。
+
+    [脆弱性修正 2026-10 §BD] "tests"ディレクトリを除外対象に追加した。
+    §AZで新設したtests/test_firmament_enclave_tee.py自身が、本物の漏洩
+    パターンを実機で固定するためのテストフィクスチャとして、ドキュメント
+    文字列・テスト本体の両方に`"OPENAI_API_KEY"`という文字列を
+    os.getenv/os.environを伴わない文脈で含んでいたため、CI上で本検査
+    自身がこのテストファイルを「漏洩」と誤検知し続けていた(実機検証済み:
+    GitHub ActionsのCI実行履歴で、本ワークフローが継続的に失敗していた
+    ことを確認した。`angels/_common.py`のEXCLUDED_SECRET_SCAN_DIRSに
+    "tests"を追加した§BDの修正と同根の問題)。既存のテストはいずれも
+    `root=tmp_path`を明示的に渡す一時ディレクトリ方式で検証しているため、
+    実リポジトリの"tests"を除外しても、検証能力には一切影響しない。
     """
     if root is None:
         root = ROOT
@@ -45,7 +57,7 @@ def scan_for_hardcoded_sensitive_env_keys(root: Path = None, self_path: Path = N
         self_path = _SELF_PATH
     leaked_env_in_files = []
     for p in root.rglob("*.py"):
-        if "dummy_secrets" in p.parts or "__pycache__" in p.parts:
+        if "dummy_secrets" in p.parts or "__pycache__" in p.parts or "tests" in p.parts:
             continue
         if p.resolve() == self_path:
             # 本スクリプト自身はSENSITIVE_ENV_KEYSというキー名の一覧
