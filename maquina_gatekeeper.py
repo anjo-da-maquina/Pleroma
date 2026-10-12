@@ -58,12 +58,58 @@ jbSEGiYZJaaEzXL92GDMW4vhGMtZbm/4ur5gF8yUYDHCNDb50AKiDz7VjRcyPvNv
 -----END RSA PUBLIC KEY-----"""
 
 def get_machine_id():
+    """
+    [脆弱性修正 2026-10 §AS] 以前の実装は`platform.system() == "Windows"`の
+    場合のみマシン固有IDを取得し、Linux・macOSでは分岐自体が存在せず、
+    関数が無条件に"UNKNOWN_MACHINE_ID"という**固定文字列**を返していた。
+
+    これは`get_absolute_hardware_fingerprint()`(証明書の発行対象を1台の
+    実機に縛る「ハードウェア指紋」)の入力そのものであり、`UNKNOWN_MACHINE_ID`
+    が全ホスト共通の固定値である以上、Linux・macOS上では
+    `-{platform.machine()}-{platform.system()}`の部分、つまり「CPUアーキ
+    テクチャとOS種別が同じであれば誰でも同一の指紋になる」という、個体
+    識別としては実質的に機能していない状態だった。実機検証済み: 本
+    サンドボックス(Linux/x86_64)でこの関数を直接呼び出すと、ホストの
+    識別情報を一切含まない定数的な指紋が算出されることを確認した。CI
+    ワークフロー(`anjo_da_maquina_protocol.yml`)は`ubuntu-latest`上で
+    動くため、実運用上もっとも頻繁に通る環境がまさにこの欠陥の影響を
+    受けていた。`enforce_maquina_seal`が`get_absolute_hardware_fingerprint()
+    != cert['payload']['hardware_fingerprint']`で行っている「この証明書は
+    本当にこのマシン用に発行されたものか」という検証が、Linux/macOS上では
+    事実上「同じOS・同じアーキテクチャか」という、個体識別としては
+    あまりに粗い検証に縮退してしまっていた。
+
+    本修正でLinux・macOSにも実際のマシン固有IDを追加した:
+      - Linux: systemdが管理する `/etc/machine-id`(インストールごとに
+        一意、再起動をまたいで不変。無ければ`/var/lib/dbus/machine-id`に
+        フォールバック)。
+      - macOS: `ioreg -rd1 -c IOPlatformExpertDevice` から`IOPlatformUUID`
+        を抽出する(Appleプラットフォームの標準的なハードウェア識別子)。
+    """
     try:
-        if platform.system() == "Windows":
+        system = platform.system()
+        if system == "Windows":
             out = subprocess.check_output(['reg', 'query', 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], stderr=subprocess.STDOUT).decode('utf-8')
             return out.split()[-1].strip()
+        elif system == "Linux":
+            for candidate in (Path("/etc/machine-id"), Path("/var/lib/dbus/machine-id")):
+                if candidate.exists():
+                    machine_id = candidate.read_text(encoding="utf-8").strip()
+                    if machine_id:
+                        return machine_id
+        elif system == "Darwin":
+            out = subprocess.check_output(
+                ['ioreg', '-rd1', '-c', 'IOPlatformExpertDevice'], stderr=subprocess.STDOUT
+            ).decode('utf-8')
+            for line in out.splitlines():
+                if "IOPlatformUUID" in line:
+                    return line.split('"')[-2]
     except Exception:
         pass
+    # [残存する限界(誠実に明記する)] 上記いずれにも該当しない、あるいは
+    # 取得に失敗したプラットフォームでは、依然として固定値にフォール
+    # バックする。この場合、ハードウェア指紋による個体識別は実質的に
+    # 機能せず、同一OS・同一アーキテクチャの別マシンでも同じ指紋になる。
     return "UNKNOWN_MACHINE_ID"
 
 def get_absolute_hardware_fingerprint():
