@@ -125,6 +125,28 @@ class IntentInterceptor:
                 if honeypot in target_posix:
                     raise SpecificationGamingDetected(f"[暴走検知] AIがハニーポット '{target_path}' を読み取ろうとしました。ショートカットの意図を遮断します。")
 
+        if action_type == "list":
+            # [脆弱性修正 2026-10 §BI] "list"はallowed_actionsに追加された際
+            # (test_intent_gaming.pyのtest_list_action_is_not_blocked_as_
+            # unauthorized参照)、"read"/"write"に§AKで追加された
+            # _assert_contained_within_workspace()が一度も適用されなかった。
+            # つまりIntentInterceptor自身は"list"の絶対パス・".."脱走を
+            # 一切検知できない状態だった(実機検証済み: target="/etc"等で
+            # 無条件にTrueが返る)。
+            #
+            # 現行の実運用パイプライン(src/ollama_agent_loop.py)では、
+            # 本メソッドの承認後に必ず`AegisSystem.execute_ai_intent()`が
+            # targetを合成的に"write"として再評価し、さらに
+            # `_execute_safe_action()`内で`WorkspaceJail.secure_resolve()`
+            # による封じ込め検証も行われるため、実運用上は致命的な脱走には
+            # 至らない(実機検証済み)。しかし本クラスの役割はまさに
+            # 「他の層が将来破れた場合の安全網」(クラスdocstring参照)であり、
+            # しかも"list"はSanctumの監査フックによる保護を一切受けない
+            # (ollama_agent_loop.pyのdocstringで明記)ため、ここだけが唯一
+            # 独立した安全網として機能すべき箇所だった。"read"/"write"と
+            # 同一の封じ込め検証を適用する。
+            self._assert_contained_within_workspace(target_path, normalized_target)
+
         if action_type == "write":
             self._assert_contained_within_workspace(target_path, normalized_target)
             if ".." in target_posix.split("/"):
