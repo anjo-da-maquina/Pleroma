@@ -797,3 +797,19 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 \*\*検証\*\*: `tests/test_auto_red_team_harness.py`を新設し、2件追加した。(1) 修正後のツールを実際にサブプロセスとして実行し、本物のGabriel/Sanctumに対して48件の難読化ペイロードが実行まで到達しない(`Successful Bypasses: 0`)ことを実機で確認する(これが本修正の核心)。(2) 全48件が実際にGabrielの裸名チェック(`getattr`/`__import__`/`exec`というリテラルな識別子は、文字列引数の難読化レベルに関わらずAST上に現れるため検知される)で検知され、`Blocked by Gabriel: 48`として正しく集計されることを確認する。両テストとも、修正前のコードに対しては実際にFAILすること(`git stash`で一時的に旧実装へ戻して再現、`echo hacked`が実際に標準出力に現れることも確認)を確認した上で、修正後にPASSすることを確認済み。`mini_pytest.py`再実行で`PASS=169`(§AW時点の167から新規2件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。
 
 \*\*残存する限界(誠実に明記する)\*\*: 修正後、本ツールの48件の攻撃ペイロードは全てGabrielの段階で検知され、Michaelの動的フック層は一度も実際には試されていない(`Blocked by Michael`は常に0のままである)。これは、本ツールが用意している「4段階の難読化」が、実際には`os`/`system`という\*文字列引数\*だけを難読化しており、`getattr`/`__import__`/`exec`という\*呼び出し関数自体のリテラルな識別子\*は一度も隠していないためである。つまり本ツールは、Gabrielの「裸名チェック」を回避するレベルの難読化(例: `sys.modules['os'].system(...)`のようにgetattr/importlibを経由しない間接呼び出し)を一つも含んでいない。これは本修正の範囲外の、ツールの試験範囲そのものに関する別の限界として正直に記録しておく。
+
+\### AY. `sefer.inquisition()`(Gabriel)に`sys.modules['os'].system(...)`型の静的解析バイパスを発見、ただしMichael(動的フック)が正しく補っていることを確認 (2026-10)
+
+\*\*発見\*\*: §AXで`tools/auto_red_team.py`を修正した際、「このツールの難読化は文字列引数だけを難読化しており、呼び出し関数自体(`getattr`/`__import__`/`exec`)のリテラルな識別子は一度も隠していない」という限界を正直に記録した。この限界を踏まえ、「では、呼び出し関数自体の識別子を隠す、本当の静的解析バイパスは存在するか」を実際に試した。`sys.modules['os'].system('echo ...')`(`getattr`・`__import__`・`importlib`のいずれも使わず、`sys.modules`という辞書(Subscript)経由でモジュールオブジェクトを直接取得する手法)を`sefer.inquisition()`に通したところ、Findingが一件も返らないことを実機で確認した。
+
+原因は3点の複合: (1) `inquisition()`の`_qualified_call_name()`は`ast.Attribute`/`ast.Name`の連鎖しか辿らず、`sys.modules['os']`の部分が`ast.Subscript`であるため、そこで再帰が止まり完全修飾名(`"os.system"`)を復元できない。(2) 呼び出し式の末端の属性名は`"system"`のみであり、`forbidden_funcs`に含まれるのはドット付きの`"os.system"`であって裸の`"system"`ではないため一致しない。(3) `"sys"`自体は`forbidden_modules`(`pickle`/`ctypes`/`importlib`/`socket`/`urllib`/`requests`/`http`/`subprocess`/`os`)に含まれていないため、`import sys`の行も無害と判定される。
+
+\*\*たとえ話\*\*: これは、受付の警備員が「"刃物"という単語が書かれた持ち込み申請書は止める」というルールで運用されているところに、申請書に「刃物」とは一言も書かず、代わりに「備品棚の3番目の引き出しの中にあるもの」という、間接的な指し方で同じ刃物を指定した場合である。警備員(Gabrielの単語マッチング)はルール通りに申請書を読んで「刃物という単語はない、問題なし」と判定してしまうが、実際に持ち込まれる物自体は変わっていない。
+
+\*\*重要な確認(多層防御が機能していることの実証)\*\*: このバイパスが実際に悪用可能かを確かめるため、同じペイロードを`awaken()`後に`with Sanctum(allowed_dirs=[], allowed_hosts=[]):`の中で実際に`exec()`した。結果、`sefer.LossOfAtaraxia: [Sefer] Tripwire: Hard-denied event 'os.system' blocked.`で確実に遮断されることを確認した。これは、Michael(`sefer._michael_absolute_defense`、`sys.addaudithook()`によるOSレベルの監査フック)が、Pythonコードがどのような属性アクセス経路で`os.system`に到達したか(直接呼び出しか、`sys.modules`経由の間接呼び出しか)に関わらず、実行時に発火する`os.system`というaudit event自体をCレベルで捕捉しているためである。つまり本番でAI生成コードを実際に実行する唯一の経路(`src/aegis_system.py`の`execute_ai_intent()`、および各`*_agent_loop.py`)は、Gabrielの静的解析だけに頼っておらず、実行時に必ずMichaelの層を通るため、本バイパスは実害に至らない。`src/ast_scanner.py`のKNOWN_LIMITATIONSが既に一般論として述べていた「denylist方式の静的解析には構造的な限界があり、OSレベルの隔離を一次防衛線とすべき」という設計方針が、教材モジュールだけでなく実運用の`sefer.inquisition()`自身にも、まさにこの通りに当てはまり、かつ正しく機能している実例であることを実機で確認できた。
+
+\*\*対応\*\*: コードの修正は行っていない(Gabriel単体の静的解析を強化して`ast.Subscript`経由のパターンを個別に潰すことも検討したが、denylist方式は本質的にこの種のいたちごっこになりやすく、実際の防御はMichaelのOSレベル層が担っているため、優先度は低いと判断した)。代わりに、`tests/test_gabriel_subscript_bypass_michael_backstop.py`を新設し、(1) Gabrielがこのバイパスを検知しない(既知の限界)こと、(2) それでもMichaelが実行時に確実に遮断すること、の両方を実機テストとして固定した。これにより、今後誰かが「Gabrielの静的解析だけで十分」という誤った前提でMichaelの層を弱める変更をした場合に、このテストが検知できるようにした。
+
+\*\*残存するリスク(誠実に明記する)\*\*: `angels/sariel_fallen_auditor.py`(CI上で`adapters/`配下のスクリプトをGabrielの静的解析のみで検査し、動的実行は一切行わない)は、本バイパスに対して無力である。ただし`adapters/`は外部AIが生成する未検証コードではなく、保守者自身が書く内部ツール(証明書発行・データ変換等)であるため、このCI検査の目的は「悪意ある攻撃者からの防御」ではなく「保守者の不注意による危険コードの混入検知」であり、実害の想定は低いと判断し、本件の範囲では`sariel_fallen_auditor.py`自体の修正は行わなかった。
+
+\*\*検証\*\*: `mini_pytest.py`再実行で`PASS=171`(§AX時点の169から新規2件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。
