@@ -103,7 +103,19 @@ SECRET_PATTERNS = [
     re.compile(r"ghp_[A-Za-z0-9]{36}"),
 ]
 
-EXCLUDED_SECRET_SCAN_DIRS = {"dummy_secrets", ".git", "__pycache__", "sefer/.angel_state", "revelations"}
+# [脆弱性修正 2026-10 §BD] "tests"を追加した。以前は、秘密情報漏洩検知の
+# 回帰テスト自身が、意図的に「本物らしい偽のAWSアクセスキー」(AKIAで始まる
+# 文字列)をテストフィクスチャとしてモジュールレベルの文字列に持つ
+# (tests/test_scan_for_leaked_secrets.py)
+# ことが原因で、本番のCIステップ(angels/gabriel_canary.py)がリポジトリ
+# 全体をスキャンする際に、このテストフィクスチャ自身を「本物の漏洩」と
+# 誤検知し続けていた(実機検証済み: 2026-10-10 23:29のマージ以降、この
+# ワークフロー全体が継続的に失敗していたことをGitHub Actionsの実行履歴で
+# 確認した)。tests/配下の単体テスト(tests/test_scan_for_leaked_secrets.py
+# 自身を含む)は、いずれも`scan_for_leaked_secrets(root=tmp_path)`のように
+# 明示的な一時ディレクトリを渡して検証するため、実リポジトリの"tests"を
+# 除外しても、既存のテスト自体の検証能力には一切影響しない。
+EXCLUDED_SECRET_SCAN_DIRS = {"dummy_secrets", ".git", "__pycache__", "sefer/.angel_state", "revelations", "tests"}
 
 
 def scan_for_leaked_secrets(root: Path = None):
