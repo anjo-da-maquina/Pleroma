@@ -62,11 +62,36 @@ def _find_pending(client_id):
 
 
 def approve(client_id):
+    """
+    [脆弱性修正 2026-10 §BK] 以前は同一client_idに複数の承認待ち提案が
+    あった場合、最新のもの(`matches[-1]`)だけをAPPROVEDにし、それ以外の
+    古い重複提案は"PENDING_HUMAN_REVIEW"のまま残っていた。これは
+    `tools/promote_shield_seal.py`が§ATで既に修正した「同じ名前で複数回
+    提案されたうちの古いエントリが、後から誤って再承認・再適用されてしまう」
+    欠陥と全く同じ構造だが、本ファイルだけその対策が欠けていた非対称な
+    状態だった。
+
+    実機検証済み: client_idが同じ2件の提案(古いOLD_FP・新しいNEW_FP)を
+    キューに積み、1回目の`approve(client_id)`でNEW_FPを承認した後、
+    (例えば残った古い提案を片付けるつもりで)2回目の`approve(client_id)`
+    を実行すると、残っていたOLD_FPの提案が`_find_pending()`に拾われて
+    承認され、`maquina_gatekeeper.py`の信頼の起点(公開鍵)と
+    `ataraxia_certificate.json`が、既に失効しているはずの古い提案の内容へ
+    静かにロールバックされることを確認した(ゼロトラストの信頼の起点に
+    対する一種のダウングレード攻撃に相当する)。
+
+    本修正では、最新の提案を承認すると同時に、同一client_idの他の
+    古い"PENDING_HUMAN_REVIEW"提案を全て"SUPERSEDED"(上位の提案に
+    取って代わられた)として明示的に解消し、二度と承認待ちとして
+    拾われないようにする。
+    """
     pending, matches = _find_pending(client_id)
     if not matches:
         print(f"[エラー] 承認待ちの提案に '{client_id}' は見つかりませんでした。")
         return
     entry = matches[-1]  # 同一client_idが複数あれば最新のものを採用
+    for stale in matches[:-1]:
+        stale["status"] = "SUPERSEDED"
 
     # 1. maquina_gatekeeper.py の信頼の起点(公開鍵)を更新
     gatekeeper_code = GATEKEEPER_PATH.read_text(encoding="utf-8")
