@@ -93,6 +93,42 @@ def _fake_run(cmd, *a, **kw):
     assert "PYSEC-2024-XXXX" in res.stdout
 
 
+def test_duplicate_vuln_ids_from_multiple_data_sources_are_deduplicated_in_report():
+    """[実機検証 2026-10] 実際のGitHub Actions CI上で、pip-auditがOSVと
+    PyPI Advisory Databaseの両方を照会した結果、同一のCVEが
+    `vulns`配列内に重複して現れることを確認した
+    (requests==2.32.3でPYSEC-2026-1872が2回報告された実例)。
+    報告メッセージ内でこの重複がそのまま表示されず、1回だけ表示される
+    ことを検証する(検出ロジックの正しさには影響しない表示上の整理)。"""
+    stub = """
+import json as _json
+
+class _FakeCompleted:
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+def _fake_run(cmd, *a, **kw):
+    if "--version" in cmd:
+        return _FakeCompleted(returncode=0, stdout="pip-audit 2.7.0")
+    if "pip_audit" in cmd and "-r" in cmd:
+        payload = {"dependencies": [
+            {"name": "requests", "version": "2.32.3", "vulns": [
+                {"id": "PYSEC-2026-1872", "fix_versions": ["2.32.4"], "description": "dup-source-1"},
+                {"id": "PYSEC-2026-1872", "fix_versions": ["2.32.4"], "description": "dup-source-2"},
+            ]},
+        ]}
+        return _FakeCompleted(returncode=0, stdout=_json.dumps(payload))
+    return _FakeCompleted(returncode=0, stdout="")
+"""
+    res = _run_with_stubbed_subprocess(stub)
+    assert res.returncode == 1, f"stdout={res.stdout} stderr={res.stderr}"
+    assert res.stdout.count("PYSEC-2026-1872") == 1, (
+        f"重複したvuln IDがそのまま表示されている: {res.stdout}"
+    )
+
+
 def test_zero_vulnerabilities_passes():
     """[回帰防止] pip-auditが脆弱性ゼロを報告した場合、正常にPASSし
     exit code 0になること(過剰検知で常に失敗するようになっていないか)。"""

@@ -161,30 +161,11 @@ jobs:
         # されているだけでなく、その固定された版自体に既知の脆弱性(CVE)が
         # 公表されていないかをpip-audit(PyPI Advisory Database/OSV.dev)
         # で検証する。ophanim_eye.pyの「固定されているか」の検査を補完する。
-        #
-        # [DEBUG-ONLY TEMP] 動作確認用の一時的な変更: ログ・アーティファクトの
-        # 直接取得が両方ともこのセッションからは行えない(egressポリシーで
-        # blob.core.windows.net への到達が遮断されているため)。そのため、
-        # 実際のstdout/stderr/終了コードを GitHub Actions のワークフロー
-        # コマンド(::error::)でカスタムアノテーションとして出力する。
-        # アノテーションは Checks API (api.github.com) 経由で取得可能で、
-        # これはblob storageとは別経路のため到達できることを確認済み。
-        # 動作確認後に元のシンプルな形へ戻す。
-        # [DEBUG-ONLY TEMP] GitHub Actionsのrunステップは既定で`set -e`相当
-        # (bash -eo pipefail)であるため、1行目のpythonが非ゼロ終了すると
-        # そこでスクリプト全体が即座に停止し、以降のEXIT_CODE取得・cat・
-        # アノテーション出力が一切実行されないという欠陥が最初の版にあった
-        # (実機検証でAZAZEL_DEBUGアノテーションが全く出力されないことを確認)。
-        # `|| true`で1行目の失敗を明示的に握り、以降の行を必ず実行させる。
-        run: |
-          set +e
-          python angels/azazel_dependency_audit.py > /tmp/azazel_debug.txt 2>&1
-          REAL_EXIT_CODE=$?
-          set -e
-          echo "EXIT_CODE=$REAL_EXIT_CODE" >> /tmp/azazel_debug.txt
-          cat /tmp/azazel_debug.txt
-          python3 -c "content = open('/tmp/azazel_debug.txt').read()[:900]; escaped = content.replace('%', '%25').replace(chr(13), '%0D').replace(chr(10), '%0A'); print('::error::AZAZEL_DEBUG ' + escaped)"
-        continue-on-error: true
+        # 実機のGitHub Actions CI上で実際に動作確認済み(GRIMOIRE.md §BL
+        # 参照): requests==2.32.3に既知の脆弱性(CVE-2024-47081,
+        # CVE-2026-25645)が実在することを本物のpip-audit/OSV.devの照会で
+        # 検出し、本ワークフローを正しく失敗させることを確認した。
+        run: python angels/azazel_dependency_audit.py
       - name: 8. ザドキエルの天球儀 (Zadkiel - 状態遷移監査)
         run: python angels/zadkiel_astrolabe.py
       - name: 8.5. ザドキエルの勅令 (Zadkiel Shield Decree - 外部脅威取り込みの退行監査)

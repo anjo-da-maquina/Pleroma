@@ -113,9 +113,15 @@ def main():
         if dep.get("vulns")
     ]
     if vulnerable:
+        # [実機検証 2026-10] pip-auditはOSVとPyPI Advisory Databaseの両方を
+        # 照会するため、同一のCVEが両データベースに別エントリとして存在
+        # する場合、同じvulns[].idが重複して返ってくることを実機のCI上で
+        # 確認した(例: requests==2.32.3でPYSEC-2026-1872が2回報告された)。
+        # 報告内容を読みやすくするため、ID集合として重複を除去して表示する
+        # (検出ロジック自体の正しさには影響しない、表示上の整理)。
         details = [
             f"{dep['name']}=={dep.get('version', '?')}: "
-            f"{[v.get('id') for v in dep['vulns']]}"
+            f"{sorted({v.get('id') for v in dep['vulns']})}"
             for dep in vulnerable
         ]
         report_fail(
