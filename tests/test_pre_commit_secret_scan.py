@@ -85,6 +85,47 @@ def test_staged_private_key_pem_is_blocked():
         shutil.rmtree(repo, ignore_errors=True)
 
 
+def test_tests_directory_fixture_is_not_blocked_but_same_content_elsewhere_still_is():
+    """[脆弱性修正 2026-10 §BH/核心] `angels/_common.py`の
+    `EXCLUDED_SECRET_SCAN_DIRS`には§BDで"tests"が追加され、
+    `scan_for_leaked_secrets()`(gabriel_canary.pyの実体)は`tests/`配下の
+    回帰テストフィクスチャ(本物らしい偽の秘密情報)を自己検知しないよう
+    修正された。しかし本ファイル(pre_commit_secret_scan.py)は
+    SECRET_PATTERNSのみを再利用し、EXCLUDED_SECRET_SCAN_DIRSを再利用して
+    いなかったため、CI(gabriel_canary.py)では通過する全く同じ内容の変更
+    が、pre-commit側だけでは依然としてブロックされてしまう(=このファイル
+    自身のコメントが懸念していた『CIとpre-commitのズレ』が、
+    EXCLUDED_SECRET_SCAN_DIRSの観点で再発していた)。`tests/`配下への同じ
+    内容の追加はブロックされず、`tests/`配下でない全く同じ内容はブロック
+    され続けることの両方を固定する(除外対象が広すぎて本物の漏洩まで
+    見逃すようになっていないことの確認を兼ねる)。"""
+    repo = _make_temp_git_repo()
+    try:
+        (repo / "tests").mkdir()
+        (repo / "tests" / "test_some_fixture.py").write_text(
+            "AWS_KEY_LOOKALIKE = '" + "AKIA" + "ABCDEFGHIJKLMNOP" + "'\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "tests/test_some_fixture.py"], cwd=str(repo), check=True)
+        res = _run_scan_in_repo(repo)
+        assert res.returncode == 0, (
+            f"tests/配下のテストフィクスチャが誤ってブロックされました。"
+            f"stdout={res.stdout} stderr={res.stderr}"
+        )
+
+        (repo / "config.py").write_text(
+            "AWS_KEY_LOOKALIKE = '" + "AKIA" + "ABCDEFGHIJKLMNOP" + "'\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "config.py"], cwd=str(repo), check=True)
+        res2 = _run_scan_in_repo(repo)
+        assert res2.returncode == 1, (
+            "tests/配下を除外した結果、tests/配下でない全く同じ内容の本物の漏洩まで"
+            f"見逃すようになってしまいました。stdout={res2.stdout} stderr={res2.stderr}"
+        )
+    finally:
+        import shutil
+        shutil.rmtree(repo, ignore_errors=True)
+
+
 def test_preexisting_secret_in_unchanged_lines_is_not_reflagged():
     """既にコミット済みのファイルに秘密情報らしき行が存在していても、
     今回の差分で変更していない(追加行ではない)場合は再検知しない

@@ -953,3 +953,19 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 \*\*検証\*\*: `tests/test_angelic_evolution_sanctum_execution.py`を新設し、4件追加した。(1) 前提確認として、バイパスペイロードがGabrielの静的解析を無傷で通過することを固定。(2) 修正の核心として、同じペイロードを`defend_and_execute()`に通すと(Docker不在のテスト環境のため事前検閲層のみを切り離した状態で)、修正前は`True`を返し(`git stash`で確認済み)、修正後は`PermissionError`で確実に遮断され、実際にファイルが書き込まれないことを確認。(3) 回帰防止として、`learn_threat()`が動的に学習した禁止パターンに一致するペイロードは、従来通りSanctumに到達する前に即座に遮断されることを確認(§BGの修正が既存の経路を壊していないこと)。(4) 回帰防止として、ファイルI/O・外部接続を一切行わない本当に無害なコードは正常に`True`を返すこと(過剰検知になっていないこと)を確認した。`mini_pytest.py`再実行で`PASS=192`(§BF時点の188から新規4件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。既存の`tests/test_metatron_orchestrator_cassiel_ollama.py`(§AW回帰テスト)も引き続き正常にPASSすることを確認した。
 
 \*\*残存する限界\*\*: 本修正が固定するのは「`defend_and_execute()`の最終判定が実際のMichaelの実行結果を経るようになった」という、この自動防衛ループ自身の報告の正確性のみである。§AYで既に確認済みの通り、Gabriel/IntentInterceptor単体の静的解析には引き続き限界が残る。また、本修正により`src/angelic_evolution.py`は`src/adversarial_evolution.py`に依存するようになったため、将来後者が削除・大幅変更される場合は本ファイルも合わせて確認すること。
+
+\### BH. `tools/pre_commit_secret_scan.py` — §BDの除外ディレクトリ(`EXCLUDED_SECRET_SCAN_DIRS`)を再利用しておらず、CIでは通過する`tests/`配下のテストフィクスチャだけをpre-commitがブロックし続けるという、新たな「CIとpre-commitのズレ」が発生していた (2026-10)
+
+\*\*発見\*\*: §BGをmainにマージした後、`src/`・`adapters/`・`tools/`の棚卸しを継続する中で、`tools/pre_commit_secret_scan.py`を読み直した。本ファイル自身のコメントには「`angels/_common.py`の`SECRET_PATTERNS`を単一の正として再利用することで、『CIでは検知されるがpre-commitでは検知されない』というズレを防ぐ」という設計意図が明記されている。しかし実際には`SECRET_PATTERNS`のみを再利用し、§BDで`_common.py`に追加された`EXCLUDED_SECRET_SCAN_DIRS`(`tests`ディレクトリの除外)は一切再利用していないことに気づいた。
+
+実機検証: 一時的なgitリポジトリを作成し、`tests/`配下に`tests/test_scan_for_leaked_secrets.py`の実際のフィクスチャと同じ内容(`AWS_KEY_LOOKALIKE = "AKIA..."`)を持つファイルをステージして`scan_staged_changes()`を実行したところ、CI側(`angels/gabriel_canary.py`、§BD修正後)は正しく通過するのに対し、pre-commit側は依然としてコミット自体を拒否する(exit code 1)ことを確認した。
+
+\*\*たとえ話\*\*: §BDで「空港の金属探知機(本番のCIスキャン)」が、訓練用の模造ナイフ(テストフィクスチャ)を本物の武器と誤認しないように、探知機の巡回範囲から訓練用品の保管庫(`tests/`)を外した。しかし、その建物には別の入り口に「手荷物の持ち込み検査(pre-commitフック)」という独立した検査員がいて、この検査員には保管庫の除外ルールが伝達されておらず、今でも訓練用の模造ナイフを持ち込もうとする人(`tests/`配下へのコミット)を本物の武器だと思って毎回止め続けていた、という状態である。
+
+\*\*原因\*\*: §BDの修正は`angels/_common.py`の`scan_for_leaked_secrets()`(CI経路)と`angels/firmament_enclave_tee.py`(CI経路)の2箇所のみを対象としており、同じ`SECRET_PATTERNS`を参照しながら独自の除外ロジックを持たない`tools/pre_commit_secret_scan.py`(pre-commit経路)への横展開が行われていなかった。本ファイル自身が設計時に警戒していた「CIとpre-commitのズレ」が、パターン定義の観点では防がれていたものの、除外ディレクトリの観点では結局再発してしまっていた。
+
+\*\*対応\*\*: `_common.py`から`EXCLUDED_SECRET_SCAN_DIRS`も併せてimportし、`scan_for_leaked_secrets()`と同一の判定基準(完全一致、またはそのディレクトリ配下であること)で、ステージされたファイルパスが除外対象ディレクトリに含まれる場合はスキャン対象から外す`_is_excluded()`を新設し、`scan_staged_changes()`の冒頭で適用するようにした。
+
+\*\*検証\*\*: `tests/test_pre_commit_secret_scan.py`に`test_tests_directory_fixture_is_not_blocked_but_same_content_elsewhere_still_is`を新設した。(1) `tests/`配下に本物らしい偽のAWSキーを含む新規ファイルをステージしても、コミットがブロックされない(exit code 0)こと。(2) 全く同じ内容を`tests/`配下でない場所(`config.py`)に置いた場合は、引き続きブロックされる(exit code 1)こと、の両方を1つのテストで固定した((2)は除外範囲が広すぎて本物の漏洩まで見逃すようになっていないことの確認を兼ねる)。`git stash`で修正前のコードに戻すと(1)が失敗することを確認した。`mini_pytest.py`再実行で`PASS=193`(§BG時点の192から新規1件増加)・`FAIL=0`・`ERROR=2`(既存の無関係なもののみ)であることを確認した。既存の4件のテスト(無害なファイル・AWSキー・PEM秘密鍵の検知・既存行の再検知防止)も引き続き正常にPASSすることを確認した。
+
+\*\*残存する限界\*\*: このpre-commitフック自体は`git config core.hooksPath hooks`を手動で実行しないと有効化されない(リポジトリをクローンしただけでは自動的には動かない)ため、本件は現状では「将来このフックを有効化した開発者が、tests/配下への正当な変更のたびにコミットをブロックされ続ける」という潜在的な運用上の支障であり、CI自体を壊すものではなかった。しかし、CIとpre-commitという2つの検査経路が同じ`SECRET_PATTERNS`を参照しながら異なる除外基準を持つという非対称な状態は、§BDと同じ系統の「見せかけの一致」であり、放置すべきではないと判断した。

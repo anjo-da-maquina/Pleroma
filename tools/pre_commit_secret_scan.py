@@ -31,7 +31,26 @@ if str(_ANGELS_DIR) not in sys.path:
 # gabriel_canary.py (CI時のリポジトリ全体走査) と同じパターン定義を
 # 単一の正として再利用する。ここで独自にパターンを持たないことで、
 # 「CIでは検知されるがpre-commitでは検知されない」というズレを防ぐ。
-from _common import SECRET_PATTERNS  # noqa: E402
+#
+# [脆弱性修正 2026-10 §BH] このコメントが懸念していた「CIとpre-commitの
+# ズレ」が、SECRET_PATTERNSとは別の場所で実際に発生していた。§BDで
+# `angels/_common.py`の`EXCLUDED_SECRET_SCAN_DIRS`に"tests"を追加し、
+# `scan_for_leaked_secrets()`(gabriel_canary.pyの実体)がtests/配下の
+# テストフィクスチャ(本物らしい偽の秘密情報)を自己検知しないよう修正した。
+# しかし本ファイルはSECRET_PATTERNSのみを再利用し、EXCLUDED_SECRET_SCAN_DIRS
+# は再利用していなかったため、§BDの修正がここには反映されず、CI側は
+# 通過するのにpre-commit側だけがtests/配下のテストフィクスチャを「秘密情報
+# の漏洩」として誤ってコミット自体をブロックしてしまう状態になっていた
+# (実機検証済み: tests/test_scan_for_leaked_secrets.pyのフィクスチャと同じ
+# 内容を含む新規ファイルをtests/配下にステージしてこのスクリプトを実行する
+# と、exit code 1でコミットが拒否されることを確認した)。
+from _common import SECRET_PATTERNS, EXCLUDED_SECRET_SCAN_DIRS  # noqa: E402
+
+
+def _is_excluded(rel_path: str) -> bool:
+    """`angels/_common.py`の`scan_for_leaked_secrets()`と同一の判定基準
+    (完全一致、またはそのディレクトリ配下であること)を用いる。"""
+    return any(rel_path == ex or rel_path.startswith(ex + "/") for ex in EXCLUDED_SECRET_SCAN_DIRS)
 
 
 def get_staged_file_paths() -> list[str]:
@@ -66,6 +85,8 @@ def scan_staged_changes() -> list[tuple]:
     一致リストを返す。空リストなら秘密情報らしきパターンは検知されなかった。"""
     hits = []
     for rel_path in get_staged_file_paths():
+        if _is_excluded(rel_path):
+            continue
         added_text = get_staged_added_lines(rel_path)
         if not added_text:
             continue
