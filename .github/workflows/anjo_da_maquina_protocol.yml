@@ -132,8 +132,6 @@ jobs:
       - name: 3.5. 穹窿の聖域 (Firmament Enclave - TEEメモリ暗号化監査)
         run: python angels/firmament_enclave_tee.py
       - name: 3.6. シャミールの封印 (Shamir's Seal - 分散鍵管理と鍵復元定足数監査)
-        env:
-          CHAOS_MODE: ${{ github.event.inputs.chaos_mode == 'true' && 'true' || 'false' }}
         run: python angels/shamir_seal.py
       - name: 3.8. 外部要件の抽出 (Excel to YAML Parser)
         run: python adapters/excel_to_yaml_parser.py
@@ -143,8 +141,6 @@ jobs:
       - name: 4.5. メタトロンの啓示 (Metatron MCP - 情報統制監査)
         run: python angels/metatron_revelation_mcp.py
       - name: 4.8. 熾天使の合意 (Seraphim Consensus - マルチLLM異端検知)
-        env:
-          CHAOS_MODE: ${{ github.event.inputs.chaos_mode == 'true' && 'true' || 'false' }}
         run: python angels/seraphim_consensus.py
       - name: 4.9. エノクの神託 (Enochian Oracle - 分散型オラクル真理監査)
         run: python angels/enochian_oracle.py
@@ -226,8 +222,6 @@ jobs:
         if: success()
         run: python adapters/external_qa_wrapper.py
       - name: 18.5. 智天使の結界 (Cherubim - eBPFランタイム監査)
-        env:
-          CHAOS_MODE: ${{ github.event.inputs.chaos_mode == 'true' && 'true' || 'false' }}
         run: python angels/cherubim_ebpf_guard.py
       - name: 19. 力天使の試練 (Virtues - 非機能要件負荷監査)
         if: success()
