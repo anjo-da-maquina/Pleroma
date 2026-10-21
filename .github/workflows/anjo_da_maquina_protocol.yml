@@ -272,6 +272,13 @@ jobs:
         # の『正直な自己開示』マーカーを含む説明コメントを義務化する。
         if: success()
         run: python angels/jerahmeel_fail_open_guard.py
+      - name: 22.76. ハナエルの道筋検問 (Hanael's Waypoint - 無検証パス結合の実使用検知)
+        # [新設 2026-10 §BT] src/ollama_agent_loop.py._execute_safe_action()
+        # で実際に発見した、検証(secure_resolve等)を経ない`/`結合パスが
+        # 直接ファイルI/Oに使われていたcheck-vs-use不一致パターンを
+        # 一般化して検知する。
+        if: success()
+        run: python angels/hanael_path_join_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

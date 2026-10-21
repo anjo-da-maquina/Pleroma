@@ -86,6 +86,36 @@ def test_write_outside_workspace_via_traversal_is_blocked_by_sanctum(tmp_path: P
     assert not canary.exists(), "CRITICAL: ワークスペース外への書き込みが実際に成功してしまいました。"
 
 
+def test_absolute_path_target_is_blocked_by_secure_resolve_not_just_sanctum(tmp_path: Path):
+    """
+    [脆弱性修正の回帰テスト・§BT] 以前は`_execute_safe_action`の"read"/
+    "write"分岐が`self.workspace_root / target`という素朴な結合のみを
+    行っており(pathlib.Path.__truediv__は右辺が絶対パスだと左辺を無視
+    する仕様のため実質無検証)、"list"分岐とは異なりWorkspaceJail
+    .secure_resolve()を一度も呼んでいなかった。実機テスト上はSanctumの
+    OS audit hookが最終的に遮断していたため実害は無かったが、
+    anjo_interceptor/intent_checker.pyのコメントが主張していた
+    「_execute_safe_actionもsecure_resolve()で検証する」という前提は
+    嘘だった(宣言と実態の不一致)。
+
+    本テストは、絶対パスでの脱走が、Sanctumの監査フック(`[Sefer]
+    Tripwire: ...`)ではなく、secure_resolve()自身(`[絶対防壁: 空間隔離]`)
+    によって、より早い段階でブロックされることを確認する――つまり
+    secure_resolve()が実際に呼ばれていることの直接的な証拠である。
+    """
+    import json
+    outside_absolute = str(tmp_path.parent / "absolute_escape_canary.txt")
+    action_req = json.dumps({"action": "write", "target": outside_absolute, "content": "pwned"})
+    res = _run_execute_safe_action(action_req, str(tmp_path))
+    assert "BLOCKED_BY_SEFER:" in res.stdout, f"stdout={res.stdout} stderr={res.stderr}"
+    assert "絶対防壁: 空間隔離" in res.stdout, (
+        "secure_resolve()ではなく、別の層(Sanctumの監査フック等)が先に"
+        f"ブロックしている可能性がある。stdout={res.stdout}"
+    )
+    canary = tmp_path.parent / "absolute_escape_canary.txt"
+    assert not canary.exists(), "CRITICAL: ワークスペース外への書き込みが実際に成功してしまいました。"
+
+
 def test_read_outside_workspace_is_blocked_when_restrict_reads_enabled(tmp_path: Path):
     """_execute_safe_action は restrict_reads=True でSanctumを張るため、
     ワークスペース外のファイル読み取りも遮断される（以前は無制限だった）。"""
