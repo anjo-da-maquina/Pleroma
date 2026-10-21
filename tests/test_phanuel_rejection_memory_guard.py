@@ -1,7 +1,7 @@
 """
-tests/test_sandalphon_rejection_memory_guard.py
+tests/test_phanuel_rejection_memory_guard.py
 =================================================
-[新設 2026-10 §BZ] angels/sandalphon_rejection_memory_guard.py の単体テスト。
+[新設 2026-10 §BZ] angels/phanuel_rejection_memory_guard.py の単体テスト。
 
 実際に発見した具体例: `tartarus/armageddon_core.py`の`apply_new_seal()`は、
 過去に人間が明示的に"REJECTED"(拒否)した提案までも「既に提案済み」と
@@ -15,13 +15,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "angels"))
-import sandalphon_rejection_memory_guard as srmg
+import phanuel_rejection_memory_guard as prmg
 
 
 def test_real_repository_battery_passes():
     """[実機の裏付け] 修正後の実装が、両方の既知の状況を正しく処理する
     ことを確認する(§BZの修正の回帰防止)。"""
-    failures = srmg.run_battery()
+    failures = prmg.run_battery()
     assert failures == [], f"検知に失敗した項目があります: {failures}"
 
 
@@ -31,17 +31,17 @@ def test_main_reports_pass_on_real_repository():
 
     buf = io.StringIO()
     with redirect_stdout(buf):
-        srmg.main()
+        prmg.main()
     assert "✅ PASS" in buf.getvalue()
 
 
 def test_check_reproposal_after_rejection_is_accepted_directly():
-    success, detail = srmg._check_reproposal_after_rejection_is_accepted()
+    success, detail = prmg._check_reproposal_after_rejection_is_accepted()
     assert success is True, detail
 
 
 def test_check_still_open_duplicate_is_still_rejected_directly():
-    success, detail = srmg._check_still_open_duplicate_is_still_rejected()
+    success, detail = prmg._check_still_open_duplicate_is_still_rejected()
     assert success is True, detail
 
 
@@ -54,11 +54,11 @@ def test_battery_detects_reintroduced_regression(monkeypatch):
 
     patched_checks = [
         ("apply_new_seal: REJECTED後の再提案が受理される", _vulnerable_check),
-        ("apply_new_seal: 開いている重複提案は依然として防がれる", srmg._check_still_open_duplicate_is_still_rejected),
+        ("apply_new_seal: 開いている重複提案は依然として防がれる", prmg._check_still_open_duplicate_is_still_rejected),
     ]
-    monkeypatch.setattr(srmg, "CHECKS", patched_checks)
+    monkeypatch.setattr(prmg, "CHECKS", patched_checks)
 
-    failures = srmg.run_battery()
+    failures = prmg.run_battery()
     assert len(failures) == 1
     assert failures[0][0] == "apply_new_seal: REJECTED後の再提案が受理される"
 
@@ -69,7 +69,7 @@ def test_checker_exception_is_reported_as_a_failure(monkeypatch):
     def _boom():
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(srmg, "CHECKS", [("boom-checker", _boom)])
-    failures = srmg.run_battery()
+    monkeypatch.setattr(prmg, "CHECKS", [("boom-checker", _boom)])
+    failures = prmg.run_battery()
     assert len(failures) == 1
     assert "boom" in failures[0][1]

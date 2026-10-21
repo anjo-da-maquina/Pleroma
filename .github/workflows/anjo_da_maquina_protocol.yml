@@ -329,7 +329,7 @@ jobs:
         # 与えて正しく検知されることを継続的に検証する。
         if: success()
         run: python angels/haniel_truncation_guard.py
-      - name: 22.81. サンダルフォンの祈りの記憶 (Sandalphon's Memory of Prayers - 拒否された提案の永久封殺検知)
+      - name: 22.81. パヌエルの祈りの記憶 (Phanuel's Memory of Prayers - 拒否された提案の永久封殺検知)
         # [新設 2026-10 §BZ] tartarus/armageddon_core.pyのapply_new_seal()は、
         # 同じ事件名の提案がraziel_ledger_pending.jsonに1件でも存在すれば、
         # statusを一切問わずに重複とみなし再提案を拒んでいた。これにより、
@@ -338,7 +338,7 @@ jobs:
         # なくなっていた(免疫応答ループの永久停止)。重複チェックを「現在も
         # 承認待ちの提案のみ」に限定した修正を、継続的に再検証する。
         if: success()
-        run: python angels/sandalphon_rejection_memory_guard.py
+        run: python angels/phanuel_rejection_memory_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
