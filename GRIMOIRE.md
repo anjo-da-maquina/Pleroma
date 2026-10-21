@@ -1211,3 +1211,25 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 **検証**: `tests/test_ariel_vigilant_watch.py`(9件)・`tests/test_angels_scripts_wired_into_ci.py`への追加2件を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.77として配線。リポジトリ全体のpytestを再実行し、278 passed(§BT時点の267から11件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
 
 **残存する限界(正直に記す)**: (1) GitHub Actionsの式は文脈依存の変数参照(`steps.x.outcome`等)を含むため、本検査は静的に判定可能な明白なリテラル(`false`・`0`・空文字列)のみを検知する。`steps.x.outcome == 'nonexistent_status'`のような、実行時には常に偽だが静的には判定できない巧妙な無効化は検知できない。(2) `uses:`ステップ(アクション呼び出し)自体の無効化は検査対象外。(3) ワークフローファイルの削除自体、あるいはジョブ全体の`if:`条件での無効化(個別ステップではなくジョブ単位)は、本天使の現在の実装では未確認であり、今後の一般化の対象として残る。
+
+### §BV: §11.9フェーズE着手。`requirements.txt`に未宣言のまま実際に`import`されていた4パッケージ、および`anjo_da_maquina_protocol.yml`自身がそれと無関係にハードコードしていた依存リストの乖離(§APの教訓への再発)を発見・修正し、一般化検知する新天使(`angels/orifiel_supply_chain_guard.py`)を追加
+
+**発見**: §BUに続き、§11.9ロードマップのフェーズE(未宣言の依存関係・サプライチェーン注入の検知)に着手するにあたり、実在する具体例を探した。リポジトリ全体を`grep`で調査したところ、以下2種類の「宣言と実態の食い違い」を発見した。
+
+一つ目は、`src/ollama_agent_loop.py`等が無条件に`import ollama`を行っていたにもかかわらず、`requirements.txt`には`ollama`が一度も宣言されていなかったこと(`src/openai_agent_loop.py`・`src/secure_oracle_feed.py`の`openai`・`google.generativeai`は`try/except`で保護されていたが、これらも同様に未宣言だった。また`tools/build_public_scripture.py`が実行時に必要とする`setuptools`も未宣言だった)。
+
+二つ目は、`.github/workflows/anjo_da_maquina_protocol.yml`の依存インストール手順が、`requirements.txt`とは無関係に`pip install networkx pyyaml playwright mcp pandas openpyxl pytest`という独自のハードコードされたリストを使っていたこと。リポジトリ全体を検索したところ、このうち`networkx`・`mcp`・`pandas`は**一箇所もimportされておらず**、完全に不要かつバージョン無指定(サプライチェーン上の無用な攻撃面)のままインストールされ続けていた。さらに重大なのは、`.github/workflows/sanctuary_ci.yml`自身のコメント(§AP)が既に「2本のワークフローが依存関係を共有せずに乖離すると、修正が片方にしか反映されない事故が起きる」と明記していた教訓に、まさに`anjo_da_maquina_protocol.yml`のこの箇所自身が違反し続けていたことである――これは既に文書化されていたにもかかわらず、一度も直されていなかった既知の教訓の再発である。
+
+**たとえ話**: 食材庫の「正式な買い物リスト」(`requirements.txt`)には書かれていない食材を、台所(本番コード)が実際には毎日使っていた――棚を見れば使われていることは分かるのに、買い物リストだけを見ている人には「この店はこの食材を一切扱っていない」ように見える。さらに、別の調理担当(Angelsワークフロー)は、その正式な買い物リストを見もせず、自分だけの古いメモで「とりあえずこれを全部買ってこい」と指示していた。そのメモの中には、もう誰も使っていない食材(`networkx`・`mcp`・`pandas`)まで含まれていたが、誰も気づかず毎回買い続けていた。そして、食材庫の壁には既に「買い物リストを別々に管理すると、片方だけ更新されて事故が起きる」という貼り紙(§APの教訓)が貼られていたのに、その貼り紙の真下で、まさにその事故が静かに起き続けていた。
+
+**対応**: WebSearch・WebFetchで実在するPyPI上の最新の安定版バージョンを一つずつ確認した上で(`ollama==0.6.3`・`openai==3.35.1`・`google-generativeai==0.8.6`・`setuptools==84.0.0`、いずれも捏造せず実在のリリース情報源で裏付け済み)、`requirements.txt`に4パッケージを追加した。`.github/workflows/anjo_da_maquina_protocol.yml`の依存インストール手順を、`pip install -r requirements.txt`のみに置き換え、`requirements.txt`を唯一の正とする方針(`sanctuary_ci.yml`が既に採用している方式)に統一した。
+
+**一般化**: この具体例(「実際のimportとrequirements.txtの宣言の不一致」「CIワークフローの独自ハードコードされたpip installとrequirements.txtの乖離」)を一般化する新天使`angels/orifiel_supply_chain_guard.py`を作成した。(1) `angels`・`src`・`adapters`・`anjo_interceptor`・`sefer`・`tools`・`maquina_gatekeeper.py`を対象に、`ast.parse()`で全importを静的に収集し、標準ライブラリ(`sys.stdlib_module_names`)・リポジトリ内のローカルモジュールを除外した上で、残りがすべて`requirements.txt`に(既知のパッケージ名対応表経由で)宣言されているかを検査する。(2) `.github/workflows/*.yml`の各ステップの`run:`ブロックをYAMLとして解析し、`pip install`/`pip3 install`で`requirements.txt`経由ではなく直接指定されたパッケージが無いかを検査する。
+
+**実装中の自己レッドチーム**: 当初、import走査をregex(正規表現、行頭一致)で実装する案を検討したが、着手前の自己検証で以下2つの欠陥を発見したため、実装そのものを`ast.parse()`ベースに切り替えた。(1) `import a, b, c`のようなカンマ区切りの複数import文で、regexは最初の1つしか捉えられず、2番目以降を見逃す(偽陰性)。(2) docstring内の使用例のテキスト(行頭が`import numpy as np`のような形)を、regexは本物のimport文と誤認する(偽陽性)。astは実際に解析されたコード上のimport文のみを見るため、この2つの欠陥は両方とも構造的に解消された。切り替え後、標準入力での単体検証(`import os, numpy, sys`→`numpy`を正しく捕捉、docstring内の`import numpy`→無視)で両方の修正を確認した上で、`tests/test_orifiel_supply_chain_guard.py`に回帰テストとして固定した。
+
+また、`pip install --quiet pip-audit`(`angels/azazel_dependency_audit.py`が実行時に自己インストールする、本物の正当なコード)を本検知の対象文字列抽出関数(`_extract_divergent_pip_packages`)に単体で渡すと`['pip-audit']`を抽出してしまうことを確認したが、これは偽陽性ではなく**意図的なスコープ境界**である――本天使の`find_divergent_workflow_installs()`は`.github/workflows/*.yml`のYAMLパース結果の`run:`文字列のみを走査し、Pythonソースファイルの内容は一切走査しないため、`azazel_dependency_audit.py`内部のこの文字列が実際に本天使へ渡ることは無い。この境界を`tests/test_orifiel_supply_chain_guard.py`内に明示的なテストとして固定した。
+
+**検証**: `tests/test_orifiel_supply_chain_guard.py`(20件、import走査の正確性・カンマ区切り偽陰性の修正固定・docstring偽陽性の修正固定・相対import除外・パッケージ名対応表・ローカルモジュール除外・pip install乖離検出・pip3対応・NOT_APPLICABLE分岐・実リポジトリでのPASS確認)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.78として配線。リポジトリ全体のpytestを再実行し、298 passed(§BU時点の278から20件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
+
+**残存する限界(正直に記す)**: (1) importの走査は静的解析であり、`importlib.import_module(動的な文字列)`のような動的importは検知できない。(2) パッケージ名とimport名が異なる場合、既知の対応表(`_IMPORT_TO_PACKAGE_ALIASES`、現時点では`yaml`→`pyyaml`・`google`→`google-generativeai`の2件のみ)で変換するが、この表に載っていない未知のパッケージについては誤って「未宣言」と判定する可能性がある(偽陽性の方向)。(3) ワークフローのrun:ステップ内の`pip install`/`pip3 install`のみを検査しており、Pythonスクリプト内部からの`subprocess`経由の動的な`pip install`(例: `angels/azazel_dependency_audit.py`が実行時にpip-auditを自己インストールする箇所)は、本天使のスコープ外として意図的に切り出している――これは静的なrequirements.txt宣言と対比すべき「宣言された依存」ではなく、実行時にのみ発生する別種のサプライチェーン上の関心事であり、今後の新たなフェーズとして一般化する余地が残る。(4) `tests/`ディレクトリ自体はimport走査の対象外としている(本番コードのみを対象とする、他の天使と同じスコープ上の判断)ため、テストファイルだけが依存する未宣言パッケージ(現時点では存在しない)は検知範囲外。
