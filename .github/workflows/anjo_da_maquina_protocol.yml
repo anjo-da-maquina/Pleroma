@@ -319,6 +319,16 @@ jobs:
         # 再現・検証する。
         if: success()
         run: python angels/remiel_equivalence_battery.py
+      - name: 22.80. ハニエルの水位標検問 (Haniel's Watermark Gate - 監査証跡の切り詰め消去検知)
+        # [新設 2026-10 §BX] sefer/audit_chain.pyのSignedAuditChain、
+        # maquina_gatekeeper.pyのZKAuditTrailはいずれも、鍵付きHMAC-SHA256
+        # による改ざん耐性を謳っていたが、「ログファイル自体を鍵の知識
+        # なしに空へ切り詰める」というもっと単純な攻撃には無力だった
+        # (「0件」と「まだ記録が無い」を区別できていなかった)。水位標
+        # ファイルの導入で修正した上で、両実装に実際に切り詰め攻撃を
+        # 与えて正しく検知されることを継続的に検証する。
+        if: success()
+        run: python angels/haniel_truncation_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

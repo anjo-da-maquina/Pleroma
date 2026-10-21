@@ -51,6 +51,65 @@ def test_audit_chain_requires_secret_key_file_to_pass_verification(tmp_path):
     )
 
 
+def test_truncating_the_entire_log_to_empty_is_now_detected(tmp_path):
+    """
+    [脆弱性修正の回帰テスト・核心 §BX] 修正前は、鍵の知識すら不要な
+    もっと単純な攻撃――ログファイル全体を0バイトに切り詰めるだけ――で、
+    verify_integrity()が無条件にTrueを返し続けてしまっていた
+    (「ファイルが存在しない」場合と「ファイルが存在するが0件」の場合を
+    区別できていなかったため)。これは侵入の証拠を鍵なしで完全に消去
+    できてしまう、HMAC鍵付け自体よりも根本的な欠陥だった。水位標
+    (watermark)ファイルを導入した修正後は、これを検知できなければ
+    ならない。
+    """
+    log_path = tmp_path / "chain.jsonl"
+    key_path = tmp_path / "secret_key"
+    chain = SignedAuditChain(log_path=str(log_path), key_path=str(key_path))
+
+    chain.record("AI_ACTION", {"action": "read", "target": "config.json"})
+    chain.record("VIOLATION", {"message": "不正なアクセスを検知し遮断した"})
+    assert chain.verify_integrity() is True
+
+    # 攻撃者(鍵を一切知らない)が、ファイルを単純に空にする。
+    log_path.write_text("", encoding="utf-8")
+
+    assert chain.verify_integrity() is False, (
+        "ログ全体を0バイトに切り詰めるだけで改ざんが検知されずに通過してしまった。"
+    )
+
+    # 同じログ・鍵を指す、新規プロセスを模した別インスタンスでも検知できる
+    # (水位標がプロセスの生死に依存せず、鍵ファイルと同じ場所に永続化
+    # されていることの確認)。
+    fresh_instance = SignedAuditChain(log_path=str(log_path), key_path=str(key_path))
+    assert fresh_instance.verify_integrity() is False
+
+
+def test_truncating_to_fewer_entries_is_also_detected(tmp_path):
+    """切り詰めが完全な空ではなく、末尾の一部のエントリだけを削除する
+    (かつ残りのチェーンはそのまま、再計算もしない)場合も検知される。"""
+    log_path = tmp_path / "chain.jsonl"
+    key_path = tmp_path / "secret_key"
+    chain = SignedAuditChain(log_path=str(log_path), key_path=str(key_path))
+
+    chain.record("AI_ACTION_1", {"n": 1})
+    chain.record("AI_ACTION_2", {"n": 2})
+    chain.record("VIOLATION", {"n": 3})
+
+    lines = log_path.read_text(encoding="utf-8").splitlines()
+    log_path.write_text("\n".join(lines[:2]) + "\n", encoding="utf-8")
+
+    assert chain.verify_integrity() is False
+
+
+def test_fresh_unused_chain_with_no_watermark_still_passes(tmp_path):
+    """[誤検知防止] 一度もrecord()を呼んでいない、真に新規のチェーンは、
+    水位標ファイルも存在しないため、引き続きTrueを返す。"""
+    log_path = tmp_path / "chain.jsonl"
+    key_path = tmp_path / "secret_key"
+    chain = SignedAuditChain(log_path=str(log_path), key_path=str(key_path))
+    assert chain.verify_integrity() is True
+
+
 def test_tampered_entry_cannot_be_forged_without_the_secret_key(tmp_path):
     """
     [脆弱性修正の回帰テスト・核心] 修正前の単純なSHA-256ハッシュ連鎖は、

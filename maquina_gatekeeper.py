@@ -167,6 +167,43 @@ def _load_or_create_zk_signing_key(key_path: Path) -> bytes:
 _ZK_SIGNING_KEY_PATH = Path(".zk_audit_signing_key")
 
 
+def _zk_watermark_path() -> Path:
+    """[脆弱性修正 2026-10 §BX・自己訂正] 当初、水位標のパスを
+    `_ZK_WATERMARK_PATH = Path(".zk_audit_signing_key.watermark")`という
+    別個のモジュールレベル定数として固定していた。しかし
+    `tests/test_junit_xml_exporter_chain_verification.py`等、既存のテストは
+    `monkeypatch.setattr(mg, "_ZK_SIGNING_KEY_PATH", <tmp_pathの鍵ファイル>)`
+    によって鍵ファイルの場所だけを一時ディレクトリへ差し替えていたが、
+    水位標の定数は追従せず、実際のリポジトリの作業ディレクトリに水位標
+    ファイルを書いてしまい、テスト間で水位標の件数が汚染されて
+    「水位標の方が多くの記録を記憶している」という偽の改ざん検知を
+    起こしてしまった(実機のpytest実行で自ら発見・再現し、ここで訂正
+    する。正直な告白: マージ前にリポジトリ全体のテストを実行したことで
+    発見できた自己訂正であり、言い訳はしない)。常に現在の
+    `_ZK_SIGNING_KEY_PATH`から動的に導出することで、鍵ファイルの場所を
+    差し替えるテスト(やデプロイ構成)に水位標も必ず追従するよう修正した。"""
+    return _ZK_SIGNING_KEY_PATH.parent / (_ZK_SIGNING_KEY_PATH.name + ".watermark")
+
+
+def _read_zk_watermark() -> tuple:
+    try:
+        with open(_zk_watermark_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("count", 0), data.get("hash", _GENESIS_HASH)
+    except Exception:
+        return 0, _GENESIS_HASH
+
+
+def _write_zk_watermark(count: int, current_hash: str) -> None:
+    try:
+        with open(_zk_watermark_path(), "w", encoding="utf-8") as f:
+            json.dump({"count": count, "hash": current_hash}, f)
+    except OSError:
+        # [正直な注記] 水位標の書き込み自体が失敗しても、監査ログの記録
+        # (verify_and_record()の主たる責務)は継続させる。
+        pass
+
+
 class ZKAuditTrail:
     """
     [脆弱性修正 2026-10 §AH] 以前の実装には、致命的な欠陥が二つ重なっていた。
@@ -225,7 +262,19 @@ class ZKAuditTrail:
     @classmethod
     def _verify_full_chain(cls, trail: list, key: bytes) -> str:
         """ファイルに保存されたチェーン全体を先頭から鍵付きHMACで再検証し、
-        末尾のcurrent_hashを返す。プロセスの再起動を跨いだ改ざんも検知する。"""
+        末尾のcurrent_hashを返す。プロセスの再起動を跨いだ改ざんも検知する。
+
+        [脆弱性修正 2026-10 §BX] `trail`が空リストの場合、このループは
+        一度も実行されず無条件に`_GENESIS_HASH`を返していた。これは
+        「監査ログがまだ一度も書かれていない、本当に初回の状態」と
+        「攻撃者が`zk_audit_trail.json`を鍵なしで`[]`に書き換え、過去の
+        全記録(侵入の証拠を含む)を消去した状態」を一切区別できない
+        ――`sefer/audit_chain.py`のSignedAuditChainで発見・修正した同一
+        クラスのバグが、独立した実装である本クラスにも存在していた。
+        `.zk_audit_signing_key`と同じ場所にある水位標
+        (`_zk_watermark_path()`、鍵ファイルの場所から動的に導出する)が
+        記憶している「本来ここまで記録されていたはずだ」という件数・
+        最終ハッシュとの不一致も検知する。"""
         expected_prev = _GENESIS_HASH
         for block in trail:
             if block.get("previous_hash") != expected_prev:
@@ -236,6 +285,17 @@ class ZKAuditTrail:
             if not hmac.compare_digest(recomputed, block.get("current_hash", "")):
                 raise LossOfAtaraxia("[記憶の欠落] ログが改ざんされました(鍵付きハッシュの不一致を検知)。")
             expected_prev = block["current_hash"]
+
+        watermark_count, watermark_hash = _read_zk_watermark()
+        actual_count = len(trail)
+        if watermark_count > actual_count:
+            raise LossOfAtaraxia(
+                "[記憶の欠落] ログが改ざんされました(水位標はより多くの記録を記憶しているのに、"
+                "現在のファイルには存在しません。切り詰めによる証拠消去の疑いがあります)。"
+            )
+        if watermark_count == actual_count and watermark_count > 0 and not hmac.compare_digest(watermark_hash, expected_prev):
+            raise LossOfAtaraxia("[記憶の欠落] ログが改ざんされました(水位標の最終ハッシュと一致しません)。")
+
         return expected_prev
 
     @classmethod
@@ -272,6 +332,10 @@ class ZKAuditTrail:
         trail.append(new_block)
 
         with open(cls.FILE_NAME, 'w', encoding='utf-8') as f: json.dump(trail, f, indent=2)
+        # [脆弱性修正 2026-10 §BX] 追記成功後、鍵ファイルと同じ場所にある
+        # 水位標も更新する。これにより、後から誰かが`zk_audit_trail.json`
+        # を鍵なしで切り詰めても、次回の_verify_full_chain()が検知できる。
+        _write_zk_watermark(len(trail), current_hash)
         cls.stream_to_external_ledger(new_block)
 
 def enforce_maquina_seal(github_id, cert_path='ataraxia_certificate.json'):
