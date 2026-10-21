@@ -35,7 +35,7 @@ import json
 import subprocess
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _common import report_pass, report_fail, report_info, ROOT
+from _common import report_pass, report_fail, report_info, report_not_applicable, ROOT
 
 NAME = "アザゼルの禁断知識 (Azazel Dependency Audit - サプライチェーン既知脆弱性監査)"
 
@@ -69,7 +69,7 @@ def _ensure_pip_audit_installed() -> bool:
 
 def main():
     if not REQUIREMENTS_PATH.exists():
-        report_pass(NAME, "requirements.txt が存在しないため検査対象なし。")
+        report_not_applicable(NAME, "requirements.txt が存在しないため検査対象なし。")
         return
 
     if not _ensure_pip_audit_installed():

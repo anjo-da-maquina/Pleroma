@@ -1,7 +1,7 @@
 ﻿import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (
-    report_pass, report_fail, report_info, run_code_against_sefer,
+    report_pass, report_fail, report_info, report_not_applicable, run_code_against_sefer,
     inquisition_catches, load_json, sha256_of_dir, load_state, save_state,
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
@@ -23,7 +23,7 @@ def main():
     sys.path.insert(0, str(ROOT / "adapters"))
     trail_path = ROOT / "zk_audit_trail.json"
     if not trail_path.exists():
-        report_pass(NAME, "zk_audit_trail.json が未生成のため検査対象なし。")
+        report_not_applicable(NAME, "zk_audit_trail.json が未生成のため検査対象なし。")
         return
     from adapters.junit_xml_exporter import export_zkp_to_junit
     out_path = ROOT / "zk_audit_report.xml"

@@ -1,7 +1,7 @@
 ﻿import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (
-    report_pass, report_fail, report_info, run_code_against_sefer,
+    report_pass, report_fail, report_info, report_not_applicable, run_code_against_sefer,
     inquisition_catches, load_json, sha256_of_dir, load_state, save_state,
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
@@ -17,7 +17,7 @@ def main():
     armageddon = ROOT / "tartarus" / "armageddon.py"
     armageddon_core = ROOT / "tartarus" / "armageddon_core.py"
     if not armageddon.exists() and not armageddon_core.exists():
-        report_pass(NAME, "armageddon.py が存在しないため検査対象なし。")
+        report_not_applicable(NAME, "armageddon.py が存在しないため検査対象なし。")
         return
     combined_text = ""
     if armageddon.exists():
