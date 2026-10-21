@@ -27,6 +27,14 @@ sefer/.audit_signing_key
 # ハッシュ連鎖に署名するための秘密鍵。初回自動生成・0600権限で作成される
 # ローカル専用の秘密情報であり、Gitにコミットしてはならない(GRIMOIRE §AH参照)。
 .zk_audit_signing_key
+# [新設 2026-10 §BX] SignedAuditChain/ZKAuditTrailいずれも、鍵ファイルと
+# 同じ場所に「最後に記録した(件数, 最終ハッシュ)」を記憶する水位標
+# (watermark)ファイルを追加した(ログファイル全体を鍵なしで空に切り詰
+# めるだけで改ざんを検知できなかった脆弱性の修正)。上記の鍵ファイル・
+# 監査ログ本体と同じく、実行時に自動生成されるローカル専用の秘密情報
+# であり、Gitにコミットしてはならない。
+sefer/.audit_signing_key.watermark
+.zk_audit_signing_key.watermark
 # [2026-10] adapters/excel_to_yaml_parser.py が requirements.xlsx(存在する
 # 場合)から生成するYAML成果物。ビルド成果物であり、Git管理対象外とする
 # (GRIMOIRE.md §AJ参照)。

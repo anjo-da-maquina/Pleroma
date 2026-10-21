@@ -53,6 +53,27 @@ class SignedAuditChain:
     HMAC-SHA256による鍵付きハッシュチェーンを用いた、追跡可能・改ざん検知可能な
     監査ログ。鍵ファイル(既定: sefer/.audit_signing_key)を読めない攻撃者は、
     チェーンの整合性を保ったまま既存エントリの改ざん・削除・偽装を行えない。
+
+    [脆弱性修正 2026-10 §BX] 上記のクラスdocstringは「改ざん・削除を行え
+    ない」と謳っていたが、実際には**鍵を一切知らなくても**、`log_path`
+    自身への書き込み権限さえあれば、ファイルを空(0バイト、または空の
+    JSON配列)に切り詰めるだけで監査証跡の全件を跡形もなく消去できる
+    ことを実機で確認した。`verify_integrity()`は「ファイルが存在しない」
+    場合に`True`を返す設計だが、「ファイルが存在するが0件」の場合も
+    ループが一度も実行されずに同じく`True`を返してしまうため、この2つの
+    状態が区別できなかった。HMACによる鍵付けは「既存の行を書き換える」
+    攻撃は防ぐが、「全ての行を削除する」攻撃には何の防御も提供しない
+    ――これは2026-10の先行修正(本ファイル冒頭のコメント参照)が意図して
+    防いだはずの「侵入の証拠を跡形もなく消せてしまう」攻撃が、鍵の知識
+    すら不要な、より単純な形でそのまま残っていたことを意味する。
+
+    本修正では、鍵ファイルと同じディレクトリに「最後に記録した
+    (index, hash)の水位標(watermark)」を保持する別ファイルを追加した。
+    `record()`は新しいエントリを追記するたびに水位標も更新し、
+    `verify_integrity()`は、ログファイルから実際に読み取れた最終エントリ
+    が、この水位標が記録している(index, hash)と一致するかどうかも検証
+    する。これにより、ログファイルを鍵なしで(部分的に、または全件)
+    切り詰める攻撃は、水位標との不一致として検知できるようになる。
     """
     def __init__(self, log_path: str = "sefer/audit_chain.jsonl", key_path: str = None):
         self.log_path = Path(log_path)
@@ -65,6 +86,32 @@ class SignedAuditChain:
         # (テスト間の汚染・本番鍵ファイルへの誤書き込み)ことを防ぐ。
         self.key_path = Path(key_path) if key_path else (self.log_path.parent / ".audit_signing_key")
         self._key = _load_or_create_signing_key(self.key_path)
+        # [脆弱性修正 2026-10 §BX] 水位標ファイルは鍵ファイルと同じ
+        # ディレクトリ・同じ命名規則に置く(鍵ファイルと同じ保護前提を
+        # 共有する設計上の判断であり、実際の保護の強さはSanctumの
+        # allowed_dirs設定に依存する――本クラス単体では変更できない
+        # 前提であることを正直に注記する)。
+        self.watermark_path = self.key_path.parent / (self.key_path.name + ".watermark")
+
+    def _read_watermark(self):
+        try:
+            with open(self.watermark_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("index", 0), data.get("hash", "0" * 64)
+        except Exception:
+            return 0, "0" * 64
+
+    def _write_watermark(self, index: int, current_hash: str):
+        try:
+            with open(self.watermark_path, "w", encoding="utf-8") as f:
+                json.dump({"index": index, "hash": current_hash}, f)
+        except OSError:
+            # [正直な注記] 水位標の書き込み自体に失敗しても、ログの記録
+            # (record()の主たる責務)は継続させる。水位標が更新されない
+            # 場合、次回のverify_integrity()はこの時点のエントリ数までの
+            # 整合性は検証できなくなるが、既存のログ記録機能そのものを
+            # 止めてしまうほうが実害が大きいと判断した。
+            pass
 
     def _compute_hash(self, entry_without_hash: dict) -> str:
         raw = json.dumps(entry_without_hash, sort_keys=True, ensure_ascii=False).encode("utf-8")
@@ -98,9 +145,23 @@ class SignedAuditChain:
         with open(self.log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
+        # [脆弱性修正 2026-10 §BX] ログファイル自体への追記成功後、
+        # 鍵ファイルと同じ場所にある水位標も更新する。これにより、
+        # 後から誰かがlog_pathを鍵なしで切り詰めても、verify_integrity()
+        # が「本来はここまで記録されていたはずだ」と検知できる。
+        self._write_watermark(new_index, entry["hash"])
+
     def verify_integrity(self) -> bool:
+        # [脆弱性修正 2026-10 §BX] 以前は「ファイルが存在しない」場合に
+        # Trueを返していたが、「ファイルが存在するが0件(切り詰め済み)」
+        # の場合も、以下のループが一度も実行されずに同じくTrueを返して
+        # しまい、この2つの状態を区別できなかった。水位標が「本来N件
+        # 記録されていたはずだ」と記憶していれば、ここで既に不一致を
+        # 検知できる(下記の最終チェックへ処理を進める)。
+        watermark_index, watermark_hash = self._read_watermark()
+
         if not self.log_path.exists():
-            return True
+            return watermark_index == 0
 
         expected_prev_hash = "0" * 64
         expected_index = 1
@@ -132,6 +193,19 @@ class SignedAuditChain:
                     expected_prev_hash = current_hash
                     expected_index += 1
         except Exception:
+            return False
+
+        final_index = expected_index - 1
+        final_hash = expected_prev_hash
+
+        # [脆弱性修正 2026-10 §BX・核心] ログファイル自体のチェーンとしては
+        # 整合していても、鍵ファイルと同じ場所にある水位標が記憶している
+        # 「本来ここまで記録されていたはずだ」という事実と食い違う場合は、
+        # ログファイルが鍵なしで切り詰められた(全件、または一部の末尾
+        # エントリが削除された)ことを意味するため、改ざんとして検知する。
+        if watermark_index > final_index:
+            return False
+        if watermark_index == final_index and not hmac.compare_digest(watermark_hash, final_hash):
             return False
 
         return True

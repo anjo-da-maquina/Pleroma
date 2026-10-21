@@ -148,6 +148,45 @@ def test_tampering_is_detected_even_in_a_brand_new_process_run(tmp_path, monkeyp
         pass
 
 
+def test_truncating_the_entire_trail_to_empty_is_now_detected(tmp_path, monkeypatch):
+    """
+    [脆弱性修正の回帰テスト・核心 §BX] `sefer/audit_chain.py`の
+    SignedAuditChainで発見した同一クラスのバグが、独立実装である
+    ZKAuditTrailにも存在していた: `zk_audit_trail.json`を鍵の知識すら
+    不要な単純な方法(ファイル全体を`[]`に書き換える)で切り詰めるだけで、
+    `_verify_full_chain([])`が無条件に`_GENESIS_HASH`を返し、
+    「まだ何も記録されていない、本当に初回の状態」であるかのように
+    振る舞ってしまっていた――侵入の証拠を鍵なしで完全に消去できる
+    欠陥だった。水位標ファイル(`.zk_audit_signing_key.watermark`)を
+    導入した修正後は、これを検知できなければならない。
+    """
+    _chdir_isolated(tmp_path, monkeypatch)
+    mg.ZKAuditTrail.verify_and_record("legit_action_1")
+    mg.ZKAuditTrail.verify_and_record("INCRIMINATING_INTRUSION_LOG")
+
+    with open(mg.ZKAuditTrail.FILE_NAME, "w", encoding="utf-8") as f:
+        json.dump([], f)
+
+    try:
+        mg.ZKAuditTrail.verify_and_record("next_action_after_erasure")
+        assert False, (
+            "ログ全体を[]に切り詰めるだけで改ざんが検知されずに通過してしまった。"
+        )
+    except mg.LossOfAtaraxia:
+        pass
+
+
+def test_fresh_unused_trail_with_no_watermark_still_works(tmp_path, monkeypatch):
+    """[誤検知防止] 一度もverify_and_record()を呼んでいない、真に新規の
+    環境では、水位標ファイルも存在しないため、引き続き正常に初回記録
+    できる。"""
+    _chdir_isolated(tmp_path, monkeypatch)
+    mg.ZKAuditTrail.verify_and_record("first_ever_action")
+    with open(mg.ZKAuditTrail.FILE_NAME, "r", encoding="utf-8") as f:
+        trail = json.load(f)
+    assert len(trail) == 1
+
+
 def test_zk_proof_field_is_not_a_fabricated_claim(tmp_path, monkeypatch):
     """旧実装の"zk_proof"は"Verified by Anjo da máquina"という固定文字列
     (何の検証も行わない見せかけ)だった。本修正後は、実際に行っている処理
