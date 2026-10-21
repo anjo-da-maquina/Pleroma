@@ -1135,3 +1135,17 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 **検証**: `tests/test_starvation_protocol_starve_path.py`(3件、新設)で`src/starvation_protocol.py`の自壊経路を初めて直接検証した。`tests/test_deadmans_switch_collar_protocol.py`・`tests/test_starvation_protocol_starve_path.py`・`tests/test_thrones_positive_path.py`・`tests/test_shamir_seal_fail_path.py`(計16件)をローカルで実行し全件PASSを確認。リポジトリ全体のpytestも実行し、236 passed・3 xfailed・既存の無関係な5件のサンドボックス固有の失敗(setuptools欠落によるsdistビルド1件、ローカル環境でのataraxia_certificate.json失効に起因する4件)のみであり、これらが本修正と無関係であることは、修正前の状態(`git stash`)でも全く同じ5件が同一の理由で失敗することを確認して裏付けた。実機では、修正を含むコミットをmainへpushし、`gh run watch`でSanctuary CI/CDが成功することを確認する(本節執筆時点では直前のpush待ち)。
 
 **残存する限界(正直に記す)**: (1) この種の「`os._exit()`直前のflush漏れ」は、構造的に`os.getenv`/`os.environ`のような環境変数ゲートのパターンではないため、`angels/thrones_positive_path.py`の検査範囲に機械的には含まれておらず、今回も手動のgrepによる横展開で発見した。将来的には、リポジトリ内の全`os._exit(`呼び出しの直前にflush呼び出しが存在するかを機械的に検査する専用の天使を追加することが、§11.9運用ルール(「一般化して新フェーズとして追加する」)への正しい対応だが、本節時点では未実装である。(2) ログ取得不能という環境的制約そのものは解消されておらず、今回追加したコミットコメント機構は、あくまで当該ワークフローに限定した迂回策である。他のワークフローで同種の問題が起きた場合、同じ対策を個別に追加する必要がある。
+
+### §BR: §BQで発見した「os._exit()直前のflush漏れ」パターンを一般化検知する新天使(`angels/barachiel_last_words.py`)を追加
+
+**発見・経緯**: §BQの「残存する限界」で、「`os._exit()`直前のflush漏れ」というパターンは`angels/thrones_positive_path.py`の検査範囲(環境変数ゲート)の外にあり、今回も手動のgrepによる横展開で発見したことを明記した。これは§11.9の運用ルール(「その場だけ直すのではなく、一般化して新フェーズとして表に追加する」)への対応が未完了だったということであり、ユーザーからの「順番はお任せします」という指示を受け、まずこの未完了事項から着手した。
+
+**たとえ話**: §BPの`thrones_positive_path.py`は「危険な分岐に消火器(テスト)が置かれているか」を見回る夜警だった。今回の`barachiel_last_words.py`は、同じ夜警の仕事だが見回る対象が違う――「死刑執行(`os._exit()`)の直前に、最後の言葉(ログ)をちゃんと紙に書き残しているか」を見回る。
+
+**実装**: `thrones_positive_path.py`は正規表現ベースのヒューリスティックだったが、今回は`ast`モジュールによる静的解析を採用した。各関数定義のボディを(ネストした別の関数定義の内部には立ち入らずに)行番号順に走査し、`os._exit(...)`呼び出しより前に`*.flush()`という属性呼び出しが一度も現れない場合を検知する。正規表現より堅牢で、コメントや文字列リテラル中の見た目だけの`os._exit(1)`を誤検知しない。
+
+**実装中の自己レッドチーム(自分自身への攻撃)**: 完成後、自ら4種類のテストケースで検知能力を試した。(1) `import os as _os`のようなosの別名import経由の呼び出しは検知できない(正直な既知の限界として固定)。(2) `out = sys.stdout; out.flush()`のような変数経由のflushは正しく検知できた(属性名`flush`のみで判定しているため、変数名に依存しない)。(3) **最も重要な発見**: `if cond: flush(); os._exit(1) else: os._exit(1)`のような、if/elseの排他的分岐構造を持つコードに対して、本検査は行番号の前後関係のみで「flush済みか」を判定しているため、else分岐の`os._exit(1)`(本来flush漏れがある)を、if分岐にあるflushの行番号がそれより小さいという理由だけで誤って「flush済み」と判定してしまう(偽陰性)。これは制御フロー(分岐)を一切解析しない、単純な行番号ベースの判定ゆえの限界であり、`thrones_positive_path.py`の「間接呼び出し経由の回避」と同種の、構造的に正直に認めるべき限界である。真の分岐対応にはCFG(制御フローグラフ)レベルの解析が必要であり、現時点の対象(`src/deadmans_switch.py`・`src/starvation_protocol.py`はいずれもこの分岐パターンを持たない)に対して不釣り合いに高コストと判断し、個別対応ではなく`tests/test_barachiel_last_words.py`に既知の限界として明示的に固定した。(4) `import os as _os`も同様に既知の限界として固定した。
+
+**検証**: `tests/test_barachiel_last_words.py`(10件、検知能力・誤検知防止・既知の限界2件の固定・NOT_APPLICABLE分岐・実リポジトリでのPASS確認)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.7として配線し、`tests/test_angels_scripts_wired_into_ci.py`で配線漏れが無いことを確認。リポジトリ全体のpytestを再実行し、246 passed(§BQ時点の236から10件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。`angels/barachiel_last_words.py`を実機で直接実行し、現時点のリポジトリ全体でPASSすることを確認した(§BQで修正した2関数が、この新天使の検査にも通ることの裏付け)。
+
+**残存する限界(正直に記す)**: (1) 上記の通り、if/elseなどの分岐構造には対応していない(偽陰性の方向)。(2) `os`の別名importには対応していない。(3) `thrones_positive_path.py`と同様、本検査は「将来似た欠陥が追加されるのを防ぐ一般化された仕組み」であり、過去に実際に発見した2件を個別に再検査するものではない――もっとも、`test_real_repository_files_pass_after_the_sbq_fix`テストがその2件を含むリポジトリ全体に対する実行を回帰防止として固定している。
