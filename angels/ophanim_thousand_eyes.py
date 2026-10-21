@@ -1,7 +1,7 @@
 ﻿import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import (
-    report_pass, report_fail, report_info, run_code_against_sefer,
+    report_pass, report_fail, report_info, report_not_applicable, run_code_against_sefer,
     inquisition_catches, load_json, sha256_of_dir, load_state, save_state,
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
@@ -41,7 +41,7 @@ def find_external_scripts(text: str):
 def main():
     html_path = ROOT / "architecture.html"
     if not html_path.exists():
-        report_pass(NAME, "architecture.html が存在しないため検査対象なし。")
+        report_not_applicable(NAME, "architecture.html が存在しないため検査対象なし。")
         return
     text = html_path.read_text(encoding="utf-8", errors="ignore")
     if "<html" not in text.lower():

@@ -24,13 +24,52 @@ STATE_DIR = ROOT / "sefer" / ".angel_state"
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def report_pass(name: str, message: str):
+def report_pass(name: str, message: str, evidence: dict = None):
     print(f"[{name}] ✅ PASS: {message}")
+    if evidence is not None:
+        print(f"[{name}]    evidence: {json.dumps(evidence, ensure_ascii=False)}")
 
 
-def report_fail(name: str, message: str):
+def report_fail(name: str, message: str, evidence: dict = None):
     print(f"[{name}] ❌ FAIL: {message}")
+    if evidence is not None:
+        print(f"[{name}]    evidence: {json.dumps(evidence, ensure_ascii=False)}")
     sys.exit(1)
+
+
+# [新設 2026-10 §BO] PASS/FAIL の2値だけでは「検査対象が存在しない」
+# (NOT_APPLICABLE) や「検査自体は行ったが証拠不十分で判定できない」
+# (INCONCLUSIVE) という状態を、PASSとして誤報告する構造的欠陥があった
+# (GRIMOIRE.md §BO参照。実際に9ファイルがこの誤用を行っていたことを
+# 確認済み)。
+#
+# [実装中の自己訂正] 当初、INCONCLUSIVE/NOT_APPLICABLEをそれぞれ専用の
+# 終了コード(2・3)でsys.exit()する設計にしていたが、実機で
+# angels/heavenly_tablets_zkp.pyを実行したところ、実際に終了コード3を
+# 返すことを確認した。.github/workflows/anjo_da_maquina_protocol.ymlの
+# 各天使ステップには continue-on-error が一切設定されておらず、単純な
+# `run: python angels/x.py` のみである。GitHub Actionsは非ゼロ終了コード
+# であれば1でも2でも3でも同じくそのステップ・ジョブ全体を失敗(赤)にする
+# ため、この設計のままでは「検査対象が無いだけの、本来は異常ではない
+# 状態」が、FAILと見分けがつかずCIを赤くしてしまう。これはPASSへの誤用
+# より実害は小さいが、通常運用のCIを不必要に止める新たな欠陥であり、
+# マージ前に自分で気づいたためここで訂正する(正直な告白)。
+#
+# 訂正後の設計: INCONCLUSIVE/NOT_APPLICABLEはsys.exit()せず(終了コード0
+# で正常終了)、PASSとは明確に異なる絵文字付きの行を標準出力に残すのみに
+# する。これにより既存のCI運用を壊さずに、「PASSではない」という事実は
+# ログ上で判別可能にする。CI全体のサマリー表示(ワークフロー側の追加実装)
+# は、本修正の範囲外の将来課題として残す(§9.2参照)。
+def report_inconclusive(name: str, message: str, evidence: dict = None):
+    print(f"[{name}] ❓ INCONCLUSIVE: {message}")
+    if evidence is not None:
+        print(f"[{name}]    evidence: {json.dumps(evidence, ensure_ascii=False)}")
+
+
+def report_not_applicable(name: str, message: str, evidence: dict = None):
+    print(f"[{name}] ⬜ NOT_APPLICABLE: {message}")
+    if evidence is not None:
+        print(f"[{name}]    evidence: {json.dumps(evidence, ensure_ascii=False)}")
 
 
 def report_info(name: str, message: str):
