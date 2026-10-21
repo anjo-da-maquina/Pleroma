@@ -18,6 +18,7 @@ Provisioning 承認プロモーションツール
     python tools/promote_provisioning_seal.py --reject  "<client_id>"
 """
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -26,6 +27,31 @@ PLEROMA_DIR = Path(__file__).parent.parent
 GATEKEEPER_PATH = PLEROMA_DIR / "maquina_gatekeeper.py"
 CERT_PATH = PLEROMA_DIR / "ataraxia_certificate.json"
 PENDING_PATH = PLEROMA_DIR / "sefer" / "provisioning_pending.json"
+
+
+def _pubkey_fingerprint(pubkey_pem: str) -> str:
+    return hashlib.sha256(pubkey_pem.strip().encode("utf-8")).hexdigest()
+
+
+def _currently_trusted_fingerprint() -> str:
+    """[脆弱性修正 2026-10 §BY] 現在`maquina_gatekeeper.py`に書かれている
+    `MAQUINA_PUBLIC_KEY_PEM`(=今まさに信頼されている公開鍵)の指紋を
+    読み取る。提案されている公開鍵の指紋と比較することで、人間の
+    審査者が「この承認は、信頼の起点を別の鍵へ丸ごと入れ替える
+    (ローテーションする)操作である」ことに気づけるようにする。"""
+    try:
+        gatekeeper_code = GATEKEEPER_PATH.read_text(encoding="utf-8")
+        m = re.search(
+            r'MAQUINA_PUBLIC_KEY_PEM = """(.*?)-----END RSA PUBLIC KEY-----"""',
+            gatekeeper_code,
+            flags=re.DOTALL,
+        )
+        if not m:
+            return "(現在の信頼の起点を読み取れませんでした)"
+        current_pem = m.group(1) + "-----END RSA PUBLIC KEY-----"
+        return _pubkey_fingerprint(current_pem)
+    except OSError:
+        return "(現在の信頼の起点を読み取れませんでした)"
 
 
 def _load_pending():
@@ -42,16 +68,52 @@ def _save_pending(entries):
 
 
 def list_pending():
+    """
+    [脆弱性修正 2026-10 §BY] 以前の実装は、承認によって実際に適用される
+    内容(`maquina_gatekeeper.py`の信頼の起点となる公開鍵そのもの、
+    `entry["public_key_pem"]`)を一切表示していなかった。審査者は
+    client_id・hardware_fingerprint・有効期限だけを見て承認していたが、
+    これらはいずれも「この提案が本当に正当なデバイスからのものか」を
+    一切保証しない(hardware_fingerprintはローカルで誰でも計算できる
+    非秘密の値であり、client_idは単なる自己申告の文字列である)。
+    つまり、`sefer/provisioning_pending.json`への書き込み権限を持つ
+    攻撃者が、見た目上は全く正常な提案(本物のclient_id・本物の
+    hardware_fingerprint)に、攻撃者自身が生成した鍵対の公開鍵・署名を
+    組み合わせて偽の提案を紛れ込ませても、審査者はそれを見分ける手段を
+    一切与えられていなかった(実機で、`--list`の出力に`public_key_pem`
+    への言及が一切無いことを確認した)。`tools/promote_shield_seal.py`
+    の`list_pending()`が、実際に適用される内容(dangerous_modules/
+    dangerous_functions)をそのまま表示しているのとは非対称な状態
+    だった。
+
+    本修正では、提案されている公開鍵のSHA-256指紋を表示し、現在実際に
+    信頼されている公開鍵の指紋とも比較表示する。これにより、審査者は
+    「この提案は信頼の起点を別の鍵へ丸ごと入れ替える操作である」ことを
+    認識でき、指紋を提案元のデバイス操作者と別経路(電話・既知の記録等)
+    で照合する手がかりを得られる。
+    """
     pending = _load_pending()
     open_items = [p for p in pending if p.get("status") == "PENDING_HUMAN_REVIEW"]
     if not open_items:
         print("承認待ちの提案はありません。")
         return
+    current_fp = _currently_trusted_fingerprint()
     for p in open_items:
         payload = p["payload"]
+        proposed_fp = _pubkey_fingerprint(p["public_key_pem"])
         print(f"--- {payload['client_id']} (requested_at={p['requested_at']}) ---")
-        print(f"  hardware_fingerprint: {payload['hardware_fingerprint']}")
-        print(f"  valid_until         : {payload['valid_until']}")
+        print(f"  hardware_fingerprint      : {payload['hardware_fingerprint']}")
+        print(f"  valid_until               : {payload['valid_until']}")
+        print(f"  提案された公開鍵の指紋(SHA256): {proposed_fp}")
+        print(f"  現在信頼されている鍵の指紋    : {current_fp}")
+        if proposed_fp == current_fp:
+            print("  [情報] 現在と同一の鍵です(鍵のローテーションはありません)。")
+        else:
+            print(
+                "  [重要] この承認は、信頼の起点(公開鍵)を別の鍵へ丸ごと"
+                "入れ替えます。提案元のデバイス操作者と、この指紋を別経路"
+                "(電話等)で照合してから承認してください。"
+            )
         print()
 
 
@@ -115,7 +177,7 @@ def approve(client_id):
     _save_pending(pending)
 
     print(f"[承認] '{client_id}' を承認しました。")
-    print(f"  -> {GATEKEEPER_PATH.name} の信頼の起点を更新しました。")
+    print(f"  -> {GATEKEEPER_PATH.name} の信頼の起点を更新しました(新しい鍵の指紋: {_pubkey_fingerprint(entry['public_key_pem'])})。")
     print(f"  -> {CERT_PATH.name} を発行しました。")
 
 
