@@ -101,7 +101,7 @@ def _is_local_module_name(name: str) -> bool:
     # パターン)を、`angels/`配下のファイルが同じ流儀でimportすると、
     # 「requirements.txtに未宣言のサードパーティimport」という偽陽性で
     # 検知してしまう欠陥があった。実機で確認済み: 新設した
-    # `angels/sandalphon_rejection_memory_guard.py`(§BZ)がこの流儀で
+    # `angels/phanuel_rejection_memory_guard.py`(§BZ)がこの流儀で
     # `armageddon_core`をimportしたところ、本天使自身がそれを誤検知し、
     # マージ前のリポジトリ全体pytest実行で初めて発覚した。`tartarus/`は
     # 他のローカルディレクトリ(angels・src・adapters等)と全く同じ

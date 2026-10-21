@@ -2,7 +2,7 @@ import sys, os, json, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "サンダルフォンの祈りの記憶 (Sandalphon's Memory of Prayers - 拒否された提案の永久封殺検知)"
+NAME = "パヌエルの祈りの記憶 (Phanuel's Memory of Prayers - 拒否された提案の永久封殺検知)"
 
 # [新設 2026-10 §BZ] 実際に発見した具体例: `tartarus/armageddon_core.py`の
 # `apply_new_seal()`は、同じ事件名の提案が`raziel_ledger_pending.json`に
