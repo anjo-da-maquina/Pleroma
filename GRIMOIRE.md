@@ -1317,3 +1317,29 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 **検証**: `tests/test_armageddon_core.py`への追加2件(再提案の受理・開いている重複の防止の継続確認)・`tests/test_promote_ledger_seal.py`(新設、4件、過去の拒否回数の警告表示・初回提案への誤警告防止・後方互換性・提案無しの場合)・`tests/test_phanuel_rejection_memory_guard.py`(新設、6件)・`tests/test_orifiel_supply_chain_guard.py`への追加1件(§BVの盲点の回帰防止)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.81として配線。リポジトリ全体のpytestを再実行し、337 passed(§BY時点の324から13件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
 
 **残存する限界(正直に記す)**: (1) `prior_rejection_count`による警告表示は、審査者が過去の拒否理由そのもの(拒否した人間が何を考えてREJECTEDとしたか)までは記録・表示していない――単に「何回拒否されたか」という回数のみであり、拒否の理由そのものを遡って確認する手段は、本修正の範囲には含まれていない。(2) `_is_local_module_name()`への`tartarus/`追加は、現時点で発見された唯一の盲点を塞いだものであり、将来`angels`・`src`等のスキャン対象ディレクトリ以外の場所に、同様の「`sys.path.insert()`してトップレベル名でimportする」ローカルモジュールが新設された場合、同じ種類の偽陽性が再発する可能性が構造的に残っている――これはPythonの`sys.path`操作を伴う動的なモジュール解決全般に対する静的解析の限界であり、本天使のスコープを超える。
+
+**命名についての訂正**: 本節で新設した天使には当初「サンダルフォン」の名を当てたが、確認を怠ったため、本リポジトリには既に同名の天使が3つ(`sandalphon_anchor`・`sandalphon_decree`・`sandalphon_echo`)存在していたことに後から気づいた。機能上の問題は無いが、天使の名簿内で同名が4つ並ぶ混乱を避けるため、未使用の大天使名「パヌエル(悔い改め・希望の天使)」へ改名した(`angels/sandalphon_rejection_memory_guard.py` → `angels/phanuel_rejection_memory_guard.py`)。一度拒否された提案に新たな実証を機に再考の機会を与える、という本件の趣旨にも合う名前である。正直に記録する。
+
+### §CA: `maquina_gatekeeper.py`の唯一の深層保護(`ultimate_audit_hook`)が、UDPの`socket.sendto()`による接続不要のデータ送信を遮断していなかった欠陥を発見・修正し、継続的に再検証する新天使(`angels/jegudiel_exfiltration_guard.py`)を追加
+
+**発見**: §BZに続き、ユーザーより引き続きの自律的な調査継続を許可いただいたため(「つづけて」)、`maquina_gatekeeper.py`全体を改めて精読した。本ファイル唯一のランタイム防御層である`ultimate_audit_hook`(`sys.addaudithook`ベースの「深層保護」、`enforce_maquina_seal`デコレータで保護された関数が実行されている間だけ有効になる)の`forbidden`集合を確認したところ、ネットワーク通信の遮断を`"socket.connect"`という単一のaudit eventのみに依存していることに気づいた。
+
+Pythonのaudit event仕様を実機で直接確認したところ、UDPソケットの`socket.sendto()`は、TCPのように事前の`connect()`を一切必要とせずデータを送信でき、その際に発火するaudit eventは`"socket.sendto"`という`"socket.connect"`とは全く別のイベント名であることを確認した。すなわち、`"socket.connect"`だけを遮断する実装では、UDPによる接続不要のデータ送信が一度も`"socket.connect"`を経由しないため、完全に素通りしてしまう。実機で、`set_sanctuary_sealed(True)`(深層保護が有効な「封鎖」状態)にした上で`socket.sendto(b"leak-data", (任意のIP, 任意のポート))`を呼び出したところ、何の例外も発生せずデータ送信が成立することを確認した。同じ実機検証で、TCP経由の`send`/`sendall`はそもそも専用のaudit eventを持たず、必ず事前の`connect`(既に遮断済み)を要するため、この経路では問題にならないことも確認した――新たに塞ぐべき穴は、UDP等の「接続不要の送信」経路に限られる。
+
+**たとえ話**: 城の正門には頑丈な検問所(`"socket.connect"`の遮断)が設けられており、誰であろうと正門を通ろうとすれば必ず誰何される。しかし城の外壁には、そもそも「通行」という手続きを経ずに、外側へ向けて矢文(UDPパケット)を一本だけ放つことができる小さな隙間(`socket.sendto`)があった。検問所の番人は「誰も正門を通っていない」ことだけを根拠に安心しているが、実際には城内の機密情報を書いた矢文が、検問を一度も経由せずに城壁の外へ飛んでいってしまう。
+
+**たとえ話(§BWとの共通点)**: §BWの`import os.path`によるブロックリスト回避と全く同じ構造の欠陥である――禁止したい意図(「外部への通信・データの持ち出しを許さない」)は変わらないのに、実装が特定の一つのAPI(`connect`)にしか結び付けられていなかったため、同じ目的を達成できる別のAPI(`sendto`)を使うだけで、意図はそのまま迂回されてしまう。
+
+**対応**: `ultimate_audit_hook`の`forbidden`集合に`"socket.sendto"`を追加した。
+
+**一般化**: §BW(`angels/remiel_equivalence_battery.py`)と同じ設計思想――個々のブロックリスト実装の書き方を解析するのではなく、実際に`ultimate_audit_hook`を登録し、封鎖状態で既知のネットワーク送信迂回経路(UDPの`socket.sendto()`)を実際に発火させて、正しく遮断されることを継続的に検証する――で新天使`angels/jegudiel_exfiltration_guard.py`を作成した。`remiel_equivalence_battery.py`はAST静的解析器(`sefer.inquisition`等)を対象としていたのに対し、本天使は`sys.addaudithook`ベースのランタイム監査フックを対象とする点が異なり、既存の天使群では検査対象に含まれていなかった領域である。
+
+**実装中の自己レッドチーム**: `git stash`で`maquina_gatekeeper.py`の修正だけを一時的に取り消し、本天使が実際に「遮断されなかった」として正しくFAILすることを確認した上で、修正を復元して再度PASSすることを確認した。
+
+**実装中に自分で発見・即時訂正した誤り(標準指示§準拠)**: 新天使を実装し、マージ前の必須手順であるリポジトリ全体pytest実行を行ったところ、全く無関係に見える既存の天使`tests/test_jerahmeel_fail_open_guard.py::test_real_repository_files_pass_after_the_sbs_fix`が新たに失敗し始めたことを自分で発見した。調査したところ、新天使`_check_udp_sendto_is_allowed_when_unsealed()`内の`except OSError: pass`に付けたインラインコメント(「ネットワーク到達性の問題は許容する(検査対象外)」)が、イェラミエルの沈黙の番人(§BS)が要求する「正直な自己開示」マーカー(「残存する限界」「正直な注記」等の定型句)を一つも含んでいなかったため、「理由の説明が無い、無言の例外握り潰し」として正しく検知されたことが分かった。これは既存天使の欠陥ではなく、私自身が本リポジトリの既存の作法に従わずにコメントを書いてしまった、単純な書き方の誤りである。正直に告白し、該当箇所のコメントを「[正直な注記] ...」という、本リポジトリの既存の定型句に沿った形に書き直して解消した。
+
+**命名についての事前確認**: §BZでの命名衝突(Sandalphon)の反省を踏まえ、新天使の命名前に`ls angels/`で既存の天使名との重複を確認した上で、未使用の大天使名「イェグディエル(勤勉・精励を司る天使)」を選んだ――実際に`azrael_exfiltration_guard.py`という名で一度書いた後、コミット前の確認で`azrael_scythe_slashing.py`との重複に気づき、公開前に自分で改名した。
+
+**検証**: `tests/test_thread_safety_maquina_seal.py`への追加2件(封鎖中のUDP sendto遮断・非封鎖時の誤検知防止)・`tests/test_jegudiel_exfiltration_guard.py`(新設、6件)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.82として配線。リポジトリ全体のpytestを再実行し、345 passed(§BZ時点の337から8件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
+
+**残存する限界(正直に記す)**: (1) 本天使が検証するのは「UDPの`socket.sendto()`による接続不要の送信」という既知の具体的な経路のみであり、将来Pythonが新たに追加する別のネットワークAPI、あるいは`socket.sendmsg()`等の本天使が明示的に検査していない他の送信経路(現時点でこのPythonバージョンでは専用のaudit eventを持たないことを実機で確認済みだが、将来のPythonバージョンで追加される可能性は排除できない)には自動的には及ばない。(2) `ultimate_audit_hook`自体は本リポジトリ全体のゼロトラストアーキテクチャの一層(defense in depth)に過ぎず、唯一の防衛線ではない――Docker等によるOSレベルのネットワーク隔離(`--network none`)が一次防衛線であることは、`cassiels_veil`関連の既存のGRIMOIRE記述(§L等)が既に明記している前提と同じであり、本修正はその追加の一層を補強したに過ぎない。

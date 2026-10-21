@@ -122,7 +122,22 @@ def _register_audit_hook_once():
     def ultimate_audit_hook(event, args):
         if not is_sanctuary_sealed(): return
 
-        forbidden = {"subprocess.Popen", "os.system", "os.exec", "os.posix_spawn", "socket.connect"}
+        # [脆弱性修正 2026-10 §CA] 以前は"socket.connect"のみを遮断して
+        # いたが、UDPの`socket.sendto()`は接続(connect)を一切行わずに
+        # データを送信できるため、"socket.connect"というaudit eventを
+        # 一度も発火させない。実機検証済み: `set_sanctuary_sealed(True)`
+        # (深層保護が有効な状態)でも、`socket.sendto()`によるデータ送信が
+        # 例外無しで素通りすることを確認した(TCP経由の`send`/`sendall`は
+        # そもそも専用のaudit eventを持たず、必ず事前の`connect`を要する
+        # ためこの経路では問題にならないことも実機で確認済み――ここで
+        # 新たに塞ぐべきはUDP等の「接続不要の送信」経路のみである)。
+        # §BWの「等価構文によるブロックリスト回避」(import os.path)と
+        # 同種の構造――禁止したい意図(外部への通信・データ送信)は同じ
+        # なのに、別のAPIを使うだけで素通りしてしまうパターンである。
+        forbidden = {
+            "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
+            "socket.connect", "socket.sendto",
+        }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):
             raise LossOfAtaraxia(f"[深層保護] 不純な干渉（{event}）を破棄しました。")
 
