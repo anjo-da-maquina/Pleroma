@@ -116,9 +116,20 @@ jobs:
             angel-state-
 
       - name: 3. 供物の準備 (Install Dependencies)
+        # [脆弱性修正 2026-10 §BV] 以前は`pip install networkx pyyaml
+        # playwright mcp pandas openpyxl pytest`という、requirements.txtと
+        # 無関係に独自管理されたハードコードの依存リストを使っていた。
+        # これは.github/workflows/sanctuary_ci.yml自身のコメント(§AP)が
+        # 既に「2本のワークフローが依存関係を共有せずに乖離すると、修正が
+        # 片方にしか反映されない事故が起きる」と明記していた教訓に、まさに
+        # この箇所自身が違反し続けていた。さらにnetworkx・mcp・pandasは
+        # リポジトリ全体を検索しても一箇所もimportされておらず、完全に
+        # 不要かつ無意味にバージョン無指定(サプライチェーン上の無用な
+        # 攻撃面)のままインストールされていた。requirements.txtを唯一の
+        # 正として使うよう修正する。
         run: |
           python -m pip install --upgrade pip
-          pip install networkx pyyaml playwright mcp pandas openpyxl pytest
+          pip install -r requirements.txt
           playwright install chromium --with-deps
 
       - name: 3.2. アルファとオメガの結界 (Workflow Integrity Guard)
@@ -287,6 +298,16 @@ jobs:
         # 常に偽になるif:条件による無効化を検知する。
         if: success()
         run: python angels/ariel_vigilant_watch.py
+      - name: 22.78. オリフィエルの検問 (Orifiel's Checkpoint - 未宣言依存関係・サプライチェーン注入検知)
+        # [新設 2026-10 §BV] §11.9フェーズE。requirements.txtに
+        # ollama/openai/google-generativeai/setuptoolsが未宣言のまま
+        # importされていた実際のバグ、および本ワークフロー自身の依存
+        # インストール手順がrequirements.txtと無関係にnetworkx/mcp/pandas
+        # 等をハードコードしていた実際の乖離(.github/workflows/
+        # sanctuary_ci.yml自身のコメント§APが既に警告していた教訓への
+        # 違反の再発)を、両方とも一般化して継続的に検知する。
+        if: success()
+        run: python angels/orifiel_supply_chain_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

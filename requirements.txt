@@ -4,3 +4,7 @@ requests==2.33.1
 PyYAML==6.0.3
 openpyxl==3.1.5
 playwright==1.56.0
+ollama==0.6.3
+openai==3.35.1
+google-generativeai==0.8.6
+setuptools==84.0.0
