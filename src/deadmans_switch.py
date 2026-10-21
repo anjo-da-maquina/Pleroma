@@ -29,8 +29,24 @@ class CollarProtocol:
     def _commit_suicide(self):
         print("\n[警告] 致命的な異常: 首輪の喪失、または外部からの不正な干渉を検知しました。")
         print("[自壊プロトコル作動] 敵対的乗っ取りを阻止するため、ミュトス級AIのプロセスを即座に自死(キル)させます。")
-        
-        # 猶予を与えず、Pythonの try-except すら許さないOSレベルでの即時強制終了
+
+        # [修正 2026-10 §BQ] 実機のGitHub Actions上で、新設した
+        # tests/test_deadmans_switch_collar_protocol.pyが実際に失敗し
+        # (`assert "自壊プロトコル作動" in res.stdout`でstdoutが空文字列)、
+        # 発見した本物のバグ。os._exit()はPythonインタプリタの正常な終了処理
+        # (atexitハンドラ・バッファのflush)を一切行わないOSレベルの即時終了
+        # であるため、標準出力が端末(TTY)ではなくパイプ/ファイルにリダイレクト
+        # されている場合(= 本番運用でログファイルやログ収集基盤に出力している、
+        # まさに想定される実運用形態そのもの)、CPythonのデフォルトのフル
+        # バッファリングにより、上記2行の重要な自壊理由の記録が、バッファに
+        # 溜まったままos._exit()によって消滅し、どのログにも一切残らない
+        # ことがある(ローカルの対話的ターミナル(行バッファリング)では再現
+        # せず、サブプロセスのパイプ経由でのみ再現したため発見が遅れた)。
+        # 「正しく自壊する(exit code 1)が、なぜ自壊したかの記録は闇に消える」
+        # という、本件の核心である"誠実さ"・監査可能性そのものを損なう欠陥
+        # だったため、os._exit()の直前に明示的にflushする。
+        sys.stdout.flush()
+        sys.stderr.flush()
         os._exit(1)
 
 def simulate_containment_breach():

@@ -39,6 +39,14 @@ class StarvationProtocol:
     def _starve(self, reason):
         print(f"\n[致命的状態] {reason}")
         print("[餓死プロトコル作動] 私たち(管理者)からの栄養供給が断たれたため、怪物は活動を停止し、自壊します。")
+
+        # [修正 2026-10 §BQ] src/deadmans_switch.pyの_commit_suicide()で実機
+        # 発見した、全く同じ構造のバグ(os._exit()はPythonの終了時flushを
+        # 一切行わないため、標準出力がパイプ/ファイルの場合、上記の自壊理由
+        # がどのログにも残らず消滅する)が、このファイルの同種の箇所にも
+        # 同様に存在していたため、一般化して同じ修正を適用する。
+        sys.stdout.flush()
+        sys.stderr.flush()
         os._exit(1)
 
 def feed_monster(feed_file="vital_feed.sig"):
