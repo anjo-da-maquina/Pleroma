@@ -1149,3 +1149,25 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 **検証**: `tests/test_barachiel_last_words.py`(10件、検知能力・誤検知防止・既知の限界2件の固定・NOT_APPLICABLE分岐・実リポジトリでのPASS確認)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.7として配線し、`tests/test_angels_scripts_wired_into_ci.py`で配線漏れが無いことを確認。リポジトリ全体のpytestを再実行し、246 passed(§BQ時点の236から10件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。`angels/barachiel_last_words.py`を実機で直接実行し、現時点のリポジトリ全体でPASSすることを確認した(§BQで修正した2関数が、この新天使の検査にも通ることの裏付け)。
 
 **残存する限界(正直に記す)**: (1) 上記の通り、if/elseなどの分岐構造には対応していない(偽陰性の方向)。(2) `os`の別名importには対応していない。(3) `thrones_positive_path.py`と同様、本検査は「将来似た欠陥が追加されるのを防ぐ一般化された仕組み」であり、過去に実際に発見した2件を個別に再検査するものではない――もっとも、`test_real_repository_files_pass_after_the_sbq_fix`テストがその2件を含むリポジトリ全体に対する実行を回帰防止として固定している。
+
+### §BS: §11.9フェーズB着手。`maquina_gatekeeper.py`の唯一の深層保護の設置失敗が無言で握り潰されていたフェイルオープンの脆弱性を発見・修正し、一般化検知する新天使(`angels/jerahmeel_fail_open_guard.py`)を追加
+
+**発見**: §BRで直前の宿題(os._exit直前flush漏れの一般化)を完了させた後、ユーザーから「順番はお任せします」との指示を受け、§11.9ロードマップのフェーズB(「フェイルオープンなtry-except検出の一般化」)に着手するにあたり、まず本リポジトリに実在する具体例を探すため`except Exception:\s*$`等のパターンでgrepした。その結果、`maquina_gatekeeper.py`の`_register_audit_hook_once()`――本リポジトリ唯一の深層保護(`sys.addaudithook`ベースの`ultimate_audit_hook`。`subprocess.Popen`・`os.system`・`ctypes`のimport等をプロセス全体で遮断する)を設置する、唯一の箇所――が、設置処理全体を`except Exception: pass`で囲んでいることを発見した。
+
+**たとえ話**: 金庫室の唯一の警報装置(深層保護)を設置する作業員が、「配線作業に失敗しました」というエラーを見ても、何も報告せず黙って作業完了のチェック印を押していた。その後、金庫室の管理者(`enforce_maquina_seal`)は、「警報装置は設置済み」という偽りの前提のまま金庫を開けて(`set_sanctuary_sealed(True)`)、中の作業(保護対象の`func`実行)を進めてしまう。警報が本当に鳴るかどうかは、誰も確認していない。
+
+**原因**: `sys.addaudithook()`自体が(本環境では未確認だが、将棋だけに依存せず一般論として)何らかの理由で例外を投げた場合、`except Exception: pass`によりその失敗が完全に握り潰され、`_AUDIT_HOOK_REGISTERED`は(trueに設定する行の前で例外が発生するため)`False`のままだが、呼び出し元の`absolute_closure`/`_seal_sanctuary()`はそのことに一切気づかず、戻り値も例外も見ないまま`set_sanctuary_sealed(True)`へ進んでしまう。これは「保護の設置に失敗したら、保護は無効なまま、しかし『保護されている』という状態フラグだけが立つ」という、本件が繰り返し発見してきたフェイルオープンの、最も中枢に近い実例だった。
+
+**対応**: `except Exception: pass`を削除し、`sys.addaudithook(ultimate_audit_hook)`の例外をそのまま呼び出し元へ伝播させる(フェイルクローズド)よう修正した。これにより、設置に失敗した場合は`enforce_maquina_seal`デコレータ自体が例外で停止し、「保護されていないのに保護されているかのように動作する」状態が構造的に発生しなくなる。回帰テスト`tests/test_audit_hook_registration_fails_closed.py`を新設し、`sys.addaudithook`を模擬的に失敗させた場合に例外が正しく伝播することを固定した。
+
+**一般化**: thrones_positive_path.py・barachiel_last_words.pyと同じ§11.9運用ルールに基づき、この具体例を一般化して検知する新天使`angels/jerahmeel_fail_open_guard.py`を作成した。「このexceptが本当に危険か」を意味論的に完全自動判定することは原理的に不可能なため(他の天使と同じ構造的限界)、判定ではなく「開示の強制」として設計した――本体が`pass`一文のみの無言の例外握り潰しに対し、近傍(tryの15行前からexcept本体末尾まで)に本リポジトリが既に自分の文化として使っている開示マーカー(「残存する限界」「既知の限界」「正直な注記」「正直に明記」「既知の制限」)を含むコメントが無ければFAILとする。
+
+**実機への適用で見つかった追加の1件**: 新天使を実際にリポジトリ全体に対して実行したところ、`angels/azazel_dependency_audit.py`の`_ensure_pip_audit_installed()`内の`except Exception: pass`(pip-auditが既にインストール済みかの事前確認の失敗を無視する、後続のインストール試行へ繋げるための無害な握り潰し)も未文書化として検出された。この箇所自体はファイル冒頭のdocstringで全体方針として説明されていたが、ローカルな(その場の)開示が無かったため、本天使の設計方針(「ファイル全体に一度だけ書かれた方針では免除しない」)に従い、該当箇所に直接説明コメントを追加して解消した。
+
+**実装中の自己レッドチーム(自分自身への攻撃)、8パターン**: (1)未文書化の握り潰し→検知、(2)tryの直前のコメントで文書化→免除、(3)except本体内のコメントで文書化→免除、(4)裸の`except:`→検知、(5)`raise`で再送出している場合→(そもそも握り潰しではないため)コメントの有無に関わらず検知対象外、(6)`pass`ではなくログ出力している場合→検知対象外(意図的に狭い範囲)、(7)同一try文に複数except、片方だけ文書化→文書化されていない方だけ検知、(8)マーカーが探索範囲より遠い場所(ファイル冒頭のdocstring)にしか無い場合→検知(ローカルな開示を要求する設計の意図的な限界として固定)。
+
+**実装中の自己訂正(自白)**: 完成直後、本天使自身をリポジトリ全体に対して実行する統合テスト(`test_file_with_no_except_reports_not_applicable`)を書いた際、`main()`内の当初の実装が`"except" not in text`という文字列部分一致でファイルの対象外判定をしていたため、テスト用のダミーファイルに書いた`'no except here'`という無関係な文字列リテラルの中の"except"という部分文字列に反応し、本来NOT_APPLICABLEになるべき場合にPASSを報告してしまうという、自己発見の誤りがあった。これは`thrones_positive_path.py`が自分自身のコメント内の例示コードを誤検知した時と全く同じ種類のミス(文字列部分一致による自己言及的な誤爆)であり、正直に認める。astで実際にtry/except構文の有無を判定する`_has_any_except_handler()`に置き換えて修正し、専用の回帰テストを追加した。
+
+**検証**: `tests/test_jerahmeel_fail_open_guard.py`(11件)・`tests/test_audit_hook_registration_fails_closed.py`(1件)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.75として配線し、配線漏れ検知テストが通ることを確認。リポジトリ全体のpytestを再実行し、258 passed(§BR時点の246から12件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。`angels/jerahmeel_fail_open_guard.py`を実機で直接実行し、現時点のリポジトリ全体でPASSすることを確認した。
+
+**残存する限界(正直に記す)**: (1) 本体が`pass`一文のみの場合しか検知しない(`continue`・`...`・部分的なログ出力の亜種は検知範囲外)。(2) 近傍コメントの「存在」のみを見ており、その内容が本当にその握り潰しを正当化しているかの妥当性までは判定しない――コメントさえあれば(内容が的を外れていても)通過する、意図的な「判定ではなく開示の強制」という設計。(3) このため、悪意または不注意により「残存する限界」というマーカー文字列だけを機械的に貼り付けて本検査を回避することは原理的に可能であり、本天使は「レビュアーが読むべき場所を示す」ことまでしか保証しない。

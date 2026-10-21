@@ -45,6 +45,12 @@ REQUIREMENTS_PATH = ROOT / "requirements.txt"
 def _ensure_pip_audit_installed() -> bool:
     """pip-auditが無ければインストールを試みる。戻り値はインストール済み
     (または元から利用可能)かどうか。"""
+    # [意図的・既知の限界として明記] ここでの握り潰しは「pip-auditが既に
+    # 利用可能か」の単純な事前確認に過ぎず、最終判断ではない。失敗した
+    # 場合は直後でインストールを試み、インストール自体が失敗した場合は
+    # (下のexceptで)明示的にFalseを返す。本検査全体の「結果が得られない
+    # 場合はPASSではなくFAILにする」というフェイルクローズドの方針は、
+    # 本ファイル冒頭の[誠実に明記する既知の限界]に記載済み。
     try:
         subprocess.run(
             [sys.executable, "-m", "pip_audit", "--version"],

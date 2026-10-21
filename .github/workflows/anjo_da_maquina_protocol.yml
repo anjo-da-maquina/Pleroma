@@ -263,6 +263,15 @@ jobs:
         # 箇所に再発した場合、マージ前に検知する。
         if: success()
         run: python angels/barachiel_last_words.py
+      - name: 22.75. イェラミエルの沈黙の番人 (Jerahmeel's Silent Guard - フェイルオープン例外握り潰し検知)
+        # [新設 2026-10 §BS] maquina_gatekeeper.py._register_audit_hook_
+        # once()で実際に発見した、唯一の深層保護の設置失敗がexcept
+        # Exception: passで握り潰され、呼び出し元が保護有効と誤信して
+        # 処理を継続していたフェイルオープンのパターンを一般化して検知
+        # する。無言の例外握り潰し(except ...: pass)には、本リポジトリ
+        # の『正直な自己開示』マーカーを含む説明コメントを義務化する。
+        if: success()
+        run: python angels/jerahmeel_fail_open_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

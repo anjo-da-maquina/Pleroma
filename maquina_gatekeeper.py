@@ -130,11 +130,21 @@ def _register_audit_hook_once():
         if event == "object.__setattr__" and hasattr(args[0], "set_sanctuary_sealed"):
             raise LossOfAtaraxia("[深層保護] 認識の改ざんを検知しました。")
 
-    try:
-        sys.addaudithook(ultimate_audit_hook)
-        _AUDIT_HOOK_REGISTERED = True
-    except Exception:
-        pass
+    # [脆弱性修正 2026-10 §BS] 以前は`except Exception: pass`で、
+    # sys.addaudithook()自体の失敗を無条件に握り潰していた。これは
+    # 「唯一の深層保護(ultimate_audit_hook、subprocess.Popen・os.system・
+    # ctypes importなどを遮断する)の設置そのものが失敗しても、呼び出し元
+    # は(例外が伝播しないため)成功したものとして処理を継続し、
+    # `set_sanctuary_sealed(True)`で『封鎖済み』を宣言してしまう」という、
+    # フェイルオープン(安全装置の設置失敗を、安全装置が有効であるかの
+    # ように握り潰して通過させる)の典型例であり、本リポジトリのゼロ
+    # トラスト思想(例: shamir_seal.pyの証明書失効時の扱い)に反する。
+    # ゼロトラストの原則に従い、設置の失敗は握り潰さずそのまま伝播させ
+    # (フェイルクローズ)、`enforce_maquina_seal`/`_seal_sanctuary`の
+    # 呼び出し自体を失敗させることで、「保護されていないのに保護されて
+    # いるかのように動作する」状態を構造的に防ぐ。
+    sys.addaudithook(ultimate_audit_hook)
+    _AUDIT_HOOK_REGISTERED = True
 
 def _load_or_create_zk_signing_key(key_path: Path) -> bytes:
     """[脆弱性修正 2026-10] ZKAuditTrailのハッシュ連鎖に鍵付けするための
