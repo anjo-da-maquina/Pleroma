@@ -248,6 +248,13 @@ jobs:
       - name: 22.5. 天の石版 (The Heavenly Tablets - ZKP生成)
         if: success()
         run: python angels/heavenly_tablets_zkp.py
+      - name: 22.6. 座天使の陣性経路 (Thrones Positive-Path - 陣性経路テスト必須化)
+        # [新設 2026-10 §BP] 環境変数/フラグで有効・無効が切り替わる
+        # セキュリティ上重要な分岐に、有効側(危険側)を実際に踏むテストが
+        # 無いまま新規追加された場合に、§BM/§BN/§BPと同じ構造の欠陥を
+        # マージ前に検知する。
+        if: success()
+        run: python angels/thrones_positive_path.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
