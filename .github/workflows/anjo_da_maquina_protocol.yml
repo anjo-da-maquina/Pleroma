@@ -308,6 +308,17 @@ jobs:
         # 違反の再発)を、両方とも一般化して継続的に検知する。
         if: success()
         run: python angels/orifiel_supply_chain_guard.py
+      - name: 22.79. レミエルの等価構文連戦 (Remiel's Equivalence Battery - 等価構文によるブロックリスト回避の継続的検知)
+        # [新設 2026-10 §BW] §11.9フェーズF。anjo_interceptor/
+        # intent_checker.pyの「深層検閲」が`import os.path`のようなドット
+        # 付きサブモジュールimportでforbidden_modulesの完全一致判定を
+        # 回避され(os.remove等が無検知で通過)、src/ast_scanner.pyの
+        # CognitiveScannerにも同一クラスのバグがあった実際の発見を、
+        # リポジトリに存在する3つのブロックリスト型AST静的解析器全てに
+        # 既知の等価構文回避ペイロードを実際に食わせることで、継続的に
+        # 再現・検証する。
+        if: success()
+        run: python angels/remiel_equivalence_battery.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

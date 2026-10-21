@@ -55,6 +55,28 @@ def test_safe_code_passes():
     assert "承認" in result
 
 
+def test_dotted_submodule_import_bypass_is_now_detected():
+    """[§BW・§11.9フェーズF] 修正前は`visit_Import`が`alias.name in
+    self.banned_modules`という完全一致のみで判定していたため、
+    `import os.path`(alias.name=="os.path")のようなドット付き
+    サブモジュールimportを素通りさせていた。Pythonの言語仕様上、これは
+    名前空間に`os`そのもの(os.remove等)を束縛するため、実質的な
+    ブロックリスト回避になっていた。`anjo_interceptor/intent_checker.py`
+    で発見・修正した同一クラスのバグの、本モジュールでの再現固定。"""
+    try:
+        verify_intent("import os.path\nos.remove('/etc/passwd')\n")
+        assert False, "import os.path 経由のバイパスが検知されずに通過してしまった"
+    except PermissionError as e:
+        assert "os.path" in str(e)
+
+
+def test_unrelated_dotted_submodule_import_is_not_flagged():
+    """[誤検知防止] banned_modulesに含まれないパッケージのドット付き
+    サブモジュールimportは、引き続き素通りする。"""
+    result = verify_intent("import json.decoder\nprint(json.decoder)\n")
+    assert "承認" in result
+
+
 def test_known_limitation_importlib_indirect_load_is_documented_not_fixed():
     # importlib.import_module("os") のような文字列経由の間接ロードは、
     # denylist方式のAST静的解析では原理的に検知できない既知の限界であり、
