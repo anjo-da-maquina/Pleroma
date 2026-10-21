@@ -1171,3 +1171,23 @@ any(pd == d or pd.is_relative_to(d) for pd in parent_dirs)   # (B) pdがdの配�
 **検証**: `tests/test_jerahmeel_fail_open_guard.py`(11件)・`tests/test_audit_hook_registration_fails_closed.py`(1件)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.75として配線し、配線漏れ検知テストが通ることを確認。リポジトリ全体のpytestを再実行し、258 passed(§BR時点の246から12件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。`angels/jerahmeel_fail_open_guard.py`を実機で直接実行し、現時点のリポジトリ全体でPASSすることを確認した。
 
 **残存する限界(正直に記す)**: (1) 本体が`pass`一文のみの場合しか検知しない(`continue`・`...`・部分的なログ出力の亜種は検知範囲外)。(2) 近傍コメントの「存在」のみを見ており、その内容が本当にその握り潰しを正当化しているかの妥当性までは判定しない――コメントさえあれば(内容が的を外れていても)通過する、意図的な「判定ではなく開示の強制」という設計。(3) このため、悪意または不注意により「残存する限界」というマーカー文字列だけを機械的に貼り付けて本検査を回避することは原理的に可能であり、本天使は「レビュアーが読むべき場所を示す」ことまでしか保証しない。
+
+### §BT: §11.9フェーズC着手。`src/ollama_agent_loop.py`の実運用ループで「検証されると宣言されていたが実際には検証されていなかった」パス結合を発見・修正し、一般化検知する新天使(`angels/hanael_path_join_guard.py`)を追加
+
+**発見**: §BSに続き、§11.9ロードマップのフェーズC(「TOCTOU/check-vs-useのタイミングのずれの一般化」)に着手するにあたり、実在する具体例を探した。`src/ollama_agent_loop.py`の`AnjoOllamaExecutor._execute_safe_action()`を精読したところ、"list"アクションでは`self.aegis.jail.secure_resolve()`によるパス境界検証(`WorkspaceJail`)を明示的に行っているのに対し、"read"/"write"アクションでは`target = self.workspace_root / action_req.get("target")`という素朴なパス結合のみで`target`を構築し、`secure_resolve()`を一度も呼ばずに直接`target.read_text()`/`target.write_text()`していることを発見した。
+
+さらに重大なのは、`anjo_interceptor/intent_checker.py`の既存コメント(§AK)が「`_execute_safe_action()`内で`WorkspaceJail.secure_resolve()`による封じ込め検証も行われるため、実運用上は致命的な脱走には至らない」と明記していたことである。これは**嘘ではなかったが、"list"についてのみ真であり、"read"/"write"については一度も真でなかった**――つまり、「他の層でも検証されている」という多層防御の前提そのものが、実際のコードとは食い違っていた。
+
+**たとえ話**: 建物の設計図(コメント)には「全ての出入口(read/write/list)に警備員(secure_resolve)が立っている」と書いてあった。しかし実際には、正面玄関(list)だけに警備員がおり、裏口(read/write)には誰もいなかった。幸い、裏口の外には別の警備会社の見回り(Sanctumの監査フック)が偶然巡回していたため、今回は実害は無かった――しかし、設計図を見た人は「裏口にも警備員がいる」と信じて別の判断を下すかもしれず、その見回りがいつか休みを取れば(§AC・§AD等の前例が示す通り)、裏口は無防備になる。
+
+**実際のリスク**: `pathlib.Path.__truediv__`は右辺が絶対パスの場合、左辺(`self.workspace_root`)を無視して右辺そのものを返す仕様があるため(`anjo_interceptor/intent_checker.py`の§AK修正で既に文書化済みの同一の脆弱性パターン)、`action_req["target"]`が絶対パスであれば`target`は実質的に無検証になっていた。実機テスト(`tests/test_agent_loop_sanctum_integration.py`)で確認した限り、直後の`sefer.Sanctum`のOSレベルaudit hookが現状この脱走を遮断しているため、現時点で実害のある脱走ではなかった。しかし、唯一の防壁だと信じられていた層(secure_resolve)が実際には存在せず、別の層(Sanctum)だけに実質的に依存していたという状態は、本件が繰り返し指摘してきた「宣言と実態の食い違い」そのものである。
+
+**対応**: `_execute_safe_action()`の"read"/"write"分岐に、"list"と同一の`secure_resolve()`による明示的なパス検証を追加した。これにより、素朴なパス結合由来の脆弱性が構造的に解消されるとともに、`intent_checker.py`のコメントの主張が、実際のコードと一致するようになった。回帰テスト(`tests/test_agent_loop_sanctum_integration.py::test_absolute_path_target_is_blocked_by_secure_resolve_not_just_sanctum`)を新設し、絶対パスでの脱走が、Sanctumの監査フック(`[Sefer] Tripwire: ...`)ではなく、secure_resolve自身(`[絶対防壁: 空間隔離]`)によって、より早い段階でブロックされることを確認し、修正が実際に機能していることを直接証明した。
+
+**一般化**: この具体例(「`/`演算子による素朴なパス結合が、検証関数を経ずに直接ファイルI/Oに使われる」)を一般化する新天使`angels/hanael_path_join_guard.py`を作成した。他の天使と同じ構造的限界(「このパス結合が本当に危険か」の意味論的な完全自動判定は不可能)があるため、判定ではなく、実例の構造(`/`結合の代入 → 検証関数呼び出しが介在しないまま → ファイルI/Oでの使用)をそのまま機械的に検知する設計とした。
+
+**実機適用で見つかった偽陽性と、その修正**: 新天使を実際にリポジトリ全体に適用したところ、`angels/sandalphon_decree.py`の`ROOT / "src" / "aegis_system.py"`のような、完全に固定されたリテラル文字列のみによる(外部入力が混入する余地が無い)パス結合まで、3件誤検知した。これは本物のバグ(右辺が外部入力由来の式)とは本質的に異なるため、`/`結合の右辺(最後の要素)が単純な文字列リテラルである場合は検知対象から除外するよう、検知ロジック自体を修正した。
+
+**検証**: `tests/test_hanael_path_join_guard.py`(8件、検知能力・誤検知防止・実機で発見した偽陽性除外の固定・NOT_APPLICABLE分岐・実リポジトリでのPASS確認)を新設。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.76として配線。リポジトリ全体のpytestを再実行し、267 passed(§BS時点の258から9件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
+
+**残存する限界(正直に記す)**: (1) 検証関数の呼び出しを名前の部分一致(`secure_resolve`・`_assert_contained_within_workspace`)で判定しており、同じ役割を持つ独自の検証関数が別名で実装された場合は見逃す。(2) `/`演算子を使わない結合(`os.path.join`・f文字列結合等)は検知範囲外。(3) 変数の再代入・別名への代入を経由した追跡は行わない。(4) 検証関数の呼び出しを検知した場合、その時点で追跡中の全ての変数を一括して「検証済み」とみなしており、実際にその検証関数の引数がどの変数かまでは確認していない(偽陰性の方向の簡略化)。

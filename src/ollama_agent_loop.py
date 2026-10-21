@@ -111,7 +111,36 @@ class AnjoOllamaExecutor:
             import os as _os
             return f"[Success] Listing of {safe_path}: {sorted(_os.listdir(safe_path))}"
 
-        target = self.workspace_root / action_req.get("target")
+        # [脆弱性修正 2026-10 §BT] 以前は`self.workspace_root / action_req.get
+        # ("target")`という素朴なパス結合のみで`target`を構築していた。
+        # Pythonの`pathlib.Path.__truediv__`は右辺が絶対パスの場合、左辺
+        # (self.workspace_root)を無視して右辺そのものを返す仕様があるため
+        # (anjo_interceptor/intent_checker.py §AK参照、同一の脆弱性パターン)、
+        # `action_req["target"]`が絶対パス(例: "/etc/passwd")であれば、
+        # `target`は実質的に無検証の任意パスになっていた。
+        #
+        # [実機CIで発見した「宣言と実態の食い違い」] さらに、
+        # `anjo_interceptor/intent_checker.py`には「本メソッド
+        # (`_execute_safe_action`)が承認後に`WorkspaceJail.secure_resolve()`
+        # による封じ込め検証も行う」という、intent_checker側の検証を
+        # 正当化する前提のコメントがあったが、実際の本メソッドは"list"
+        # アクションでのみ`secure_resolve()`を呼び、"read"/"write"では
+        # 一切呼んでいなかった(宣言と実態の不一致)。実際にはこの直後の
+        # `sefer.Sanctum`のOSレベルaudit hookが実機テスト
+        # (tests/test_agent_loop_sanctum_integration.py)上は絶対パスの
+        # 脱走も現状遮断できているため、現時点で実害のある脱走ではない。
+        # しかし「唯一の防壁だと信じられていた層(secure_resolve)が実際には
+        # 存在せず、別の層(Sanctum)だけに実質的に依存していた」という
+        # 状態は、本件が繰り返し指摘してきた「宣言と実態の食い違い」その
+        # ものであり、Sanctum側に将来何らかの抜け道が見つかった場合
+        # (intent_checker.py自身が§AC・§AD等の前例を明記している)、
+        # 多層防御の片方の層が実質的に存在しないまま放置されることになる。
+        # そのため、"list"と同一の`secure_resolve()`による明示的なパス
+        # 検証を"read"/"write"にも追加し、コメントの宣言を実態と一致させる。
+        try:
+            target = self.aegis.jail.secure_resolve(action_req.get("target", "."))
+        except PermissionError as e:
+            raise SeferLossOfAtaraxia(str(e))
 
         with Sanctum(allowed_dirs=[str(self.workspace_root)], restrict_reads=True):
             if action == "read":
