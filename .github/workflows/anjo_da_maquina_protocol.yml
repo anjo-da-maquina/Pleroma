@@ -339,6 +339,17 @@ jobs:
         # 承認待ちの提案のみ」に限定した修正を、継続的に再検証する。
         if: success()
         run: python angels/phanuel_rejection_memory_guard.py
+      - name: 22.82. イェグディエルの封印網 (Jegudiel's Sealed Net - 深層保護のネットワーク送信迂回検知)
+        # [新設 2026-10 §CA] maquina_gatekeeper.pyのultimate_audit_hook
+        # ("深層保護")は、ネットワーク通信の遮断を"socket.connect"のみで
+        # 行っていたが、UDPのsocket.sendto()は事前のconnect()を一切必要と
+        # せずデータを送信できるため、封鎖中でもこの経路からの情報持ち出し
+        # が例外無く素通りしていた(§BWの"import os.path"と同種の、別の
+        # APIを使うだけでブロックリストを迂回できるパターン)。
+        # forbidden集合に"socket.sendto"を追加した修正を、継続的に再検証
+        # する。
+        if: success()
+        run: python angels/jegudiel_exfiltration_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
