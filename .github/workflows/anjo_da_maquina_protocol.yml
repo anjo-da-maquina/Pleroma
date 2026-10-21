@@ -279,6 +279,14 @@ jobs:
         # 一般化して検知する。
         if: success()
         run: python angels/hanael_path_join_guard.py
+      - name: 22.77. アリエルの不断の目 (Ariel's Vigilant Watch - 常時偽条件によるCIステップ無効化検知)
+        # [新設 2026-10 §BU] tests/test_angels_scripts_wired_into_ci.pyの
+        # 「配線漏れ検知」が、ステップのif:条件を見ずに誤判定していた
+        # (if: falseで天使を無効化してもすり抜ける)自己言及的な欠陥を
+        # 一般化し、angels/*.pyに限らず全ワークフローの全ステップに対して
+        # 常に偽になるif:条件による無効化を検知する。
+        if: success()
+        run: python angels/ariel_vigilant_watch.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
