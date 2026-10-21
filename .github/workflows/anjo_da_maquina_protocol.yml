@@ -255,6 +255,14 @@ jobs:
         # マージ前に検知する。
         if: success()
         run: python angels/thrones_positive_path.py
+      - name: 22.7. バラキエルの遺言 (Barachiel's Last Words - 自壊直前ログflush漏れ検知)
+        # [新設 2026-10 §BR] §BQで実機CIにおいて実際に発見した、
+        # os._exit()の直前にflush()が無いため自壊理由のログが(標準出力
+        # がパイプ/ファイルの場合に)消失する欠陥(src/deadmans_switch.py・
+        # src/starvation_protocol.py)と同じ構造が、今後新規追加された
+        # 箇所に再発した場合、マージ前に検知する。
+        if: success()
+        run: python angels/barachiel_last_words.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
