@@ -86,8 +86,16 @@ jobs:
           cat /tmp/sanctuary_pytest_tail.txt
           echo '```'
         } > /tmp/sanctuary_pytest_comment_body.md
+        # [実装中の自己訂正(自白) §BQ] 当初 `-f body=@...` と書いていたが、
+        # `gh api`の`@<path>`ファイル読み込み構文は`-F/--field`専用であり、
+        # `-f/--raw-field`では文字列"@/tmp/..."がそのまま送信されてしまう
+        # (= コメント本文がファイルの内容ではなく、ファイルパスの文字列その
+        # ものになる)ことを、実機で実際にこの誤った投稿が行われたのを見て
+        # 発見した。本来確認すべきこと(「診断用に追加した仕組み自体が実際に
+        # 正しく動くか」)を怠っていたこと自体が、§BPで一般化した「有効側の
+        # 分岐を実際に踏んで確認する」という教訓への違反であり、素直に認める。
         gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
-          -f body=@/tmp/sanctuary_pytest_comment_body.md
+          -F body=@/tmp/sanctuary_pytest_comment_body.md
         # ジョブ自体は、元の(continue-on-errorが無かった場合と同じ)結果である
         # 「失敗」として正しく報告する。
         exit 1
