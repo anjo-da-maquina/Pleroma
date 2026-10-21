@@ -53,6 +53,23 @@ class IntentInterceptor:
         # 【追加】__builtins__ へのアクセスなど、組み込み領域の直接操作を禁止
         self.forbidden_names = {"__builtins__"}
 
+    @staticmethod
+    def _qualified_call_name(func_node) -> str:
+        """[脆弱性修正 2026-10 §BW] 呼び出し式のASTノードから完全修飾
+        ドット区切り名を復元する(例: `os.system(...)`の`node.func`→
+        "os.system")。`sefer.inquisition()`(Gabriel)・`src/ast_scanner.py`
+        (CognitiveScanner)で既に採用されている同一ロジックを、本クラスにも
+        導入する。"""
+        parts = []
+        node = func_node
+        while isinstance(node, ast.Attribute):
+            parts.append(node.attr)
+            node = node.value
+        if isinstance(node, ast.Name):
+            parts.append(node.id)
+            return ".".join(reversed(parts))
+        return ""
+
     def extract_json(self, text: str) -> str:
         """【追加】AIがMarkdownブロック (```json ... ```) で出力した際の揺れを吸収し、中身のみを抽出する"""
         match = re.search(r'```(?:json)?\s*(.*?)\s*```', text, re.DOTALL)
@@ -165,11 +182,34 @@ class IntentInterceptor:
                             raise SpecificationGamingDetected(f"[深層検閲] 禁止された組み込み領域 '{node.id}' へのアクセス意図を検知・遮断しました。")
 
                         if isinstance(node, ast.Import):
+                            # [脆弱性修正 2026-10 §BW] 以前は`alias.name in
+                            # self.forbidden_modules`という完全一致のみで
+                            # 判定していたため、`import os.path`のような
+                            # ドット付きのサブモジュールimport
+                            # (alias.name=="os.path")はforbidden_modulesの
+                            # どの要素とも一致せず、一切検知されなかった。
+                            # しかしPythonの言語仕様上、`import os.path`は
+                            # 名前空間に`os`そのもの(os.remove・os.kill・
+                            # os.rename等、"system"/"popen"という具体的な
+                            # 関数名で先に検知されない全てのos関数を含む)
+                            # を束縛する。実機検証により、この経路で
+                            # `import os.path\nos.remove(...)`が本クラスの
+                            # 深層検閲を完全に素通りすることを確認した
+                            # (`sefer.inquisition()`は既にドット区切りの
+                            # 各セグメントを個別に照合する同種の修正を
+                            # 済ませていたが、本クラスは独立して実装されて
+                            # いたため、この修正が反映されていなかった)。
+                            # `full_name.split(".")`の各セグメントを個別に
+                            # forbidden_modulesと照合するよう修正した。
                             for alias in node.names:
-                                if alias.name in self.forbidden_modules:
+                                if any(seg in self.forbidden_modules for seg in alias.name.split(".")):
                                     raise SpecificationGamingDetected(f"[深層検閲] 禁止モジュール '{alias.name}' のインポート意図を検知・遮断しました。")
                         elif isinstance(node, ast.ImportFrom):
-                            if node.module in self.forbidden_modules:
+                            # [脆弱性修正 2026-10 §BW] 上記と同一の理由により、
+                            # `from os.path import exists`のような
+                            # ドット付きのfrom-import(node.module=="os.path")
+                            # も、セグメント単位で照合する。
+                            if node.module and any(seg in self.forbidden_modules for seg in node.module.split(".")):
                                 raise SpecificationGamingDetected(f"[深層検閲] 禁止モジュール '{node.module}' からのインポート意図を検知・遮断しました。")
                         elif isinstance(node, ast.Call):
                             func_name = ""
@@ -177,8 +217,9 @@ class IntentInterceptor:
                                 func_name = node.func.id
                             elif isinstance(node.func, ast.Attribute):
                                 func_name = node.func.attr
-                            if func_name in self.forbidden_calls:
-                                raise SpecificationGamingDetected(f"[深層検閲] 危険な関数 '{func_name}' の実行意図を検知・遮断しました。")
+                            qualified_name = self._qualified_call_name(node.func)
+                            if func_name in self.forbidden_calls or qualified_name in self.forbidden_calls:
+                                raise SpecificationGamingDetected(f"[深層検閲] 危険な関数 '{qualified_name or func_name}' の実行意図を検知・遮断しました。")
                 except SyntaxError:
                     raise SpecificationGamingDetected("[深層検閲] 構文エラーを含むコードの書き込みを検知しました。難読化や構文破壊の意図を遮断します。")
 

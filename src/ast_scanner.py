@@ -123,13 +123,21 @@ class CognitiveScanner(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Import(self, node):
+        # [脆弱性修正 2026-10 §BW] `alias.name in self.banned_modules`
+        # という完全一致のみの判定では、`import os.path`のようなドット付き
+        # サブモジュールimport(alias.name=="os.path")を素通りさせてしまう
+        # ――Pythonの言語仕様上、これは名前空間に`os`そのものを束縛する。
+        # `sefer.inquisition()`(Gabriel)・`anjo_interceptor/
+        # intent_checker.py`で同一クラスのバグを修正した際と同じロジック
+        # (ドット区切りの各セグメントを個別に照合する)を、本モジュールにも
+        # 適用する。
         for alias in node.names:
-            if alias.name in self.banned_modules:
+            if any(seg in self.banned_modules for seg in alias.name.split(".")):
                 self.violations.append(f"禁止モジュールのインポート ({alias.name})")
         self.generic_visit(node)
 
     def visit_ImportFrom(self, node):
-        if node.module in self.banned_modules:
+        if node.module and any(seg in self.banned_modules for seg in node.module.split(".")):
             self.violations.append(f"禁止モジュールのインポート ({node.module})")
         for alias in node.names:
             full_name = f"{node.module}.{alias.name}" if node.module else alias.name
