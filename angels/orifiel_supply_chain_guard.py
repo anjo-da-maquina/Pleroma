@@ -92,7 +92,22 @@ def _is_local_module_name(name: str) -> bool:
         return True
     # リポジトリ直下、またはスキャン対象ディレクトリ直下に
     # <name>.pyが存在する場合もローカルモジュールとみなす。
-    for d in [ROOT, *[ROOT / td for td in TARGET_DIRS_FOR_IMPORT_SCAN]]:
+    #
+    # [脆弱性修正 2026-10 §BZ] 以前はここに`tartarus/`が含まれておらず、
+    # `tartarus/armageddon_core.py`のような、リポジトリ内部の純粋ロジック
+    # モジュール(`sys.path.insert(0, ".../tartarus")`した上で`import
+    # armageddon_core`のように、ディレクトリ名を介さずトップレベル名で
+    # importする、本リポジトリの`tests/`で既に使われている確立済みの
+    # パターン)を、`angels/`配下のファイルが同じ流儀でimportすると、
+    # 「requirements.txtに未宣言のサードパーティimport」という偽陽性で
+    # 検知してしまう欠陥があった。実機で確認済み: 新設した
+    # `angels/sandalphon_rejection_memory_guard.py`(§BZ)がこの流儀で
+    # `armageddon_core`をimportしたところ、本天使自身がそれを誤検知し、
+    # マージ前のリポジトリ全体pytest実行で初めて発覚した。`tartarus/`は
+    # 他のローカルディレクトリ(angels・src・adapters等)と全く同じ
+    # カテゴリ(リポジトリ内部の自作コード)であり、第三者パッケージでは
+    # ないため、検索対象ディレクトリに追加した。
+    for d in [ROOT, ROOT / "tartarus", *[ROOT / td for td in TARGET_DIRS_FOR_IMPORT_SCAN]]:
         if (d / f"{name}.py").exists():
             return True
     return False

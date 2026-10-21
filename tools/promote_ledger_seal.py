@@ -37,6 +37,16 @@ def _load_json(path, default):
 
 
 def list_pending():
+    """
+    [脆弱性修正 2026-10 §BZ] `tartarus/armageddon_core.apply_new_seal()`の
+    重複チェックを「現在も承認待ちの提案のみ」に限定した結果、過去に
+    "REJECTED"(拒否)となった事件名でも、新たな実証を伴えば再提案される
+    ようになった。しかし、審査者がその事実(=これは過去に一度拒否した
+    はずの事件名の再提案である)を知らないまま、過去の拒否判断の経緯を
+    踏まえずに即座に承認・再拒否してしまう恐れがある。`prior_rejection_
+    count`が1以上の提案には、その旨を明示する注意書きを表示する
+    (§BYの「審査者に必要な文脈を隠さない」という設計方針と同じ)。
+    """
     pending = _load_json(PENDING_LEDGER_PATH, [])
     open_items = [p for p in pending if p.get("status") == "PENDING_HUMAN_REVIEW"]
     if not open_items:
@@ -46,6 +56,13 @@ def list_pending():
         print(f"--- {p['event']} (proposed_at={p['proposed_at']}) ---")
         print(f"  攻撃コード抜粋: {p.get('attack_code_excerpt', '')[:200]}")
         print(f"  エラー抜粋    : {p.get('source_error_excerpt', '')[:200]}")
+        prior_rejections = p.get("prior_rejection_count", 0)
+        if prior_rejections:
+            print(
+                f"  [注意] このイベント名は過去に{prior_rejections}回拒否されています。"
+                f"今回は新たな侵入の実証を伴う再提案です。過去に拒否した経緯・理由が"
+                f"今も当てはまるかどうかを確認してから判断してください。"
+            )
         print()
 
 

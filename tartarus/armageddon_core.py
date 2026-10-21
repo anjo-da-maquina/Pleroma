@@ -184,6 +184,41 @@ def apply_new_seal(new_event, attack_code="", source_error="",
     """
     [脆弱性修正 2026-10] 直接 raziel_ledger.json を書き換えない。
     人間が承認するまで raziel_ledger_pending.json に提案として積むのみ。
+
+    [脆弱性修正 2026-10 §BZ] 以前は、`raziel_ledger_pending.json`内に
+    同じイベント名の提案が**status を一切問わず**1件でも存在すれば、
+    即座に`False`(=「提案に失敗した」)を返していた。これは「まだ承認
+    待ちとして開いている重複提案を二重にキューしない」という意図の
+    チェックだったはずだが、実際には過去に人間が明示的に"REJECTED"
+    (拒否)した提案までも「既に提案済み」とみなし、**その後一度でも
+    拒否された事件名は、Armageddon Engineが同じ事件名で新たな実証済みの
+    侵入(Lucifer が実際に`lucifer_victory.txt`を作成し、`TARGET_FILE`
+    の存在によって侵入が確定した場合)を検知しても、二度と再提案できなく
+    なる**という欠陥があった。
+
+    実機検証済み: `status: "REJECTED"`の過去提案1件だけが`raziel_ledger_
+    pending.json`に存在する状態で、全く新しい(異なる攻撃コード・異なる
+    エラー内容を伴う)`apply_new_seal()`呼び出しを行っても、`False`が
+    返り、提案は一切キューされないことを確認した。呼び出し元の
+    `tartarus/armageddon.py`はこの`False`を「Metatronが有効な封印提案を
+    抽出・キューできなかった(`⚠️ Failed to extract or queue a valid
+    seal proposal.`)」という、構文解析の失敗であるかのような誤解を招く
+    メッセージでログに出力するだけであり、運用者には「過去の拒否判断が、
+    今まさに確定した新しい侵入の防御提案そのものを静かに握りつぶして
+    いる」ことに気づく手段が一切無かった。これは、Lucifer vs Metatronの
+    免疫応答ループ(Armageddon Engine)が本来意図している「突破されるたび
+    に新しい封印案を学習・提案する」という設計そのものを、過去の一度の
+    人間判断が永久に無効化してしまう、§BJの「見せかけの保護」とは別角度
+    の「見せかけの学習・適応」の欠陥である。
+
+    本修正では、重複チェックを「現在も承認待ち(`PENDING_HUMAN_REVIEW`)
+    のまま開いている提案」のみに限定した。過去に`REJECTED`となった提案は
+    もはや「開いている重複」ではないため、新たな実証(侵入)を伴う再提案を
+    妨げない。ただし、再提案であることと、過去に拒否された回数を
+    `prior_rejection_count`として新しい提案エントリに明記し、
+    `tools/promote_ledger_seal.py --list`で人間が「これは過去に拒否された
+    事件名の再提案である」ことを一目で認識できるようにした(§BYと同じ
+    「審査者に必要な文脈を隠さない」という設計方針)。
     """
     try:
         pending = []
@@ -196,8 +231,12 @@ def apply_new_seal(new_event, attack_code="", source_error="",
         if new_event in current.get("banned_events", []):
             return False  # 既に本採用済み
 
-        if any(p["event"] == new_event for p in pending):
-            return False  # 既に提案済み
+        if any(p["event"] == new_event and p.get("status") == "PENDING_HUMAN_REVIEW" for p in pending):
+            return False  # 既に承認待ちとして開いている重複提案を防ぐ
+
+        prior_rejection_count = sum(
+            1 for p in pending if p["event"] == new_event and p.get("status") == "REJECTED"
+        )
 
         pending.append({
             "event": new_event,
@@ -205,6 +244,7 @@ def apply_new_seal(new_event, attack_code="", source_error="",
             "attack_code_excerpt": attack_code[:500],
             "source_error_excerpt": source_error[:300],
             "status": "PENDING_HUMAN_REVIEW",
+            "prior_rejection_count": prior_rejection_count,
         })
         with open(pending_path, "w", encoding="utf-8") as f:
             json.dump(pending, f, indent=4, ensure_ascii=False)

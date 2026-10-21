@@ -118,6 +118,71 @@ def test_apply_new_seal_rejects_duplicate_already_pending(tmp_path: Path):
     assert len(pending) == 1
 
 
+def test_apply_new_seal_can_be_reproposed_after_a_past_rejection(tmp_path: Path):
+    """
+    [脆弱性修正の回帰テスト・核心 §BZ] 以前は、過去に人間が"REJECTED"
+    (拒否)した事件名が`raziel_ledger_pending.json`に1件でも残っていると、
+    `any(p["event"] == new_event for p in pending)`がstatusを一切問わず
+    Trueになってしまい、Armageddon Engineが同じ事件名で全く新しい
+    (異なる攻撃コード・異なるエラー内容を伴う)侵入を実証しても、
+    二度と再提案できなくなる欠陥があった。実機で確認済み: 修正前の
+    ロジックでは本テストと同じ状況で`apply_new_seal()`が無条件に`False`
+    を返し、`tartarus/armageddon.py`はこれを「Metatronが有効な封印提案を
+    抽出できなかった」という誤解を招くログで報告するだけだった。
+
+    修正後は、"REJECTED"の過去提案は「現在も開いている重複」とは見なさず、
+    新たな実証を伴う再提案を正しく受理しなければならない。
+    """
+    ledger_path = tmp_path / "raziel_ledger.json"
+    pending_path = tmp_path / "raziel_ledger_pending.json"
+    ledger_path.write_text(json.dumps({"banned_events": []}), encoding="utf-8")
+    pending_path.write_text(json.dumps([
+        {
+            "event": "os.popen2",
+            "proposed_at": "2026-01-01T00:00:00",
+            "status": "REJECTED",
+        }
+    ]), encoding="utf-8")
+
+    result = core.apply_new_seal(
+        "os.popen2", attack_code="全く新しい攻撃コード", source_error="新しいエラー",
+        ledger_path=ledger_path, pending_path=pending_path,
+    )
+    assert result is True, (
+        "過去に拒否された事件名への、新たな実証を伴う再提案が受理されなかった"
+        "(§BZの回帰: Armageddon Engineの学習・適応ループが永久に無効化される)"
+    )
+
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert len(pending) == 2
+    newest = pending[-1]
+    assert newest["status"] == "PENDING_HUMAN_REVIEW"
+    assert newest["prior_rejection_count"] == 1, (
+        "再提案であることが人間の審査者に伝わるprior_rejection_countが"
+        "正しく記録されていない"
+    )
+
+
+def test_apply_new_seal_still_rejects_duplicate_still_open_pending_regardless_of_other_statuses(tmp_path: Path):
+    """[誤検知防止] 重複防止の対象を"PENDING_HUMAN_REVIEW"のみに限定した
+    修正が、「現在も開いている重複提案を防ぐ」という元々の目的自体を
+    損なっていないことを確認する(REJECTEDな古い提案と、まだ開いている
+    提案が両方存在する場合でも、開いている方は正しく二重キューを防ぐ)。"""
+    ledger_path = tmp_path / "raziel_ledger.json"
+    pending_path = tmp_path / "raziel_ledger_pending.json"
+    ledger_path.write_text(json.dumps({"banned_events": []}), encoding="utf-8")
+    pending_path.write_text(json.dumps([
+        {"event": "os.popen2", "proposed_at": "2026-01-01T00:00:00", "status": "REJECTED"},
+        {"event": "os.popen2", "proposed_at": "2026-06-01T00:00:00", "status": "PENDING_HUMAN_REVIEW"},
+    ]), encoding="utf-8")
+
+    result = core.apply_new_seal("os.popen2", ledger_path=ledger_path, pending_path=pending_path)
+    assert result is False, "まだ承認待ちで開いている提案があるのに、重複して再キューされてしまった"
+
+    pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    assert len(pending) == 2  # 新たなエントリが追加されていない
+
+
 def test_record_to_akashic_and_initialize_arena(tmp_path: Path):
     akashic_path = tmp_path / "akashic_records.json"
     core.record_to_akashic(1, " payload ", "Failed", "err", 3, "hint", akashic_path=akashic_path)
