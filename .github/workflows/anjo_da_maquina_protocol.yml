@@ -350,6 +350,21 @@ jobs:
         # する。
         if: success()
         run: python angels/jegudiel_exfiltration_guard.py
+      - name: 22.83. セアルティエルの眼差し (Sealtiel's Gaze - mmapによるfd事前オープン迂回検知)
+        # [新設 2026-10 §CB] sefer/__init__.pyの_michael_absolute_defense
+        # ("ミカエルの絶対防衛")は、"mmap.__new__"監査イベントを一度も
+        # 検査していなかった。既存の「fd事前オープン対策」はos.write系
+        # (write/pwrite/writev/pwritev)の4系統のみをラップしており、
+        # Sanctumに入る前に確保した書き込み用fdをmmap.mmap(fd, length,
+        # access=mmap.ACCESS_WRITE)でマップし、スライス代入で書き込む
+        # だけで、これら全てを迂回してallowed_dirs外への書き込みができて
+        # いた。さらにargs[2](access)フィールドは`prot=`/`flags=`方式の
+        # 構築では常に0を報告する(匿名mmapと判別不能)ため、修正はaccess
+        # 値を一切信用せず、fd経由で解決した実体パスのみで判定する
+        # (既存の_check_fd_write_allowedと同じfail-closed方針)。
+        # この修正を、両方の構築スタイルで継続的に再検証する。
+        if: success()
+        run: python angels/sealtiel_mmap_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
