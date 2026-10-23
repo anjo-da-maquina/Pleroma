@@ -153,10 +153,41 @@ def _register_audit_hook_once():
         # 制限やプロセス監視の対象外で)動き続けられる新しいOSプロセスを
         # 生成してしまうため、"新しいプロセスの起動を許さない"という
         # forbidden集合の意図が、この経路だけ素通りしていた。
+        #
+        # [脆弱性修正 2026-10 §CE] `forbidden`集合は"ctypes.dlopen"/
+        # "ctypes.CDLL"/"ctypes.PyDLL"のいずれも含んでおらず、封鎖中に
+        # 新たに`ctypes`をimportすることだけを(`event == "import"`の
+        # 分岐で)遮断していた。しかし`ctypes`が封鎖の『前』に(本プロセス
+        # 内の無関係な他のコードによってでも)一度でもimportされていれば、
+        # 攻撃者は封鎖後に改めてimportし直す必要が一切ない。実機で検証
+        # したところ、`ctypes`が既にimport済みの状態で、`ctypes.pythonapi`
+        # (`ctypes`自身がimport時に生成する、実行中のPythonインタプリタ
+        # 自身への既存ハンドル)や`ctypes.CDLL(None)`(新たに取得した
+        # libcハンドル)からシンボルを解決する操作――専用のaudit event
+        # "ctypes.dlsym"(および新規dlopen時の"ctypes.dlopen")を発生させる
+        # ――のいずれも、この`forbidden`集合とは一度も一致せず、封鎖中でも
+        # 完全に素通りすることを確認した。Linux上のPython実行ファイルは
+        # libcに動的リンクされているため、これにより`system`・`unlink`・
+        # `fork`・`execve`等、forbidden集合が遮断しようとしている操作の
+        # ほぼ全てに、無検査で到達できてしまう(`subprocess.Popen`等を
+        # 遮断していても、libcの同名関数を直接呼べば同じ効果を無検査で
+        # 達成できる、という意味で§BW・§CA・§CB・§CC・§CDと同種の
+        # 「等価経路によるブロックリスト回避」)。
+        #
+        # 独立した別の防御層である`sefer/__init__.py`の
+        # `_michael_absolute_defense`は、個々のイベント名の列挙ではなく
+        # `event.startswith("ctypes.")`という名前空間ごとのデフォルト
+        # 拒否(4. デフォルト拒否)を備えているため、"ctypes.dlsym"も
+        # "ctypes.dlopen"も最初から自動的に遮断されており、この欠陥の
+        # 対象ではないことを実機で確認した(本ファイル側が個別の
+        # イベント名を列挙する狭いallowlist方式であるのに対し、sefer側は
+        # 名前空間ごとの広いdefault-deny方式を採用しているという、
+        # 設計そのものの違いに起因する非対称性である)。
         forbidden = {
             "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
             "os.fork", "os.forkpty",
             "socket.connect", "socket.sendto",
+            "ctypes.dlopen", "ctypes.dlsym",
         }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):
             raise LossOfAtaraxia(f"[深層保護] 不純な干渉（{event}）を破棄しました。")
