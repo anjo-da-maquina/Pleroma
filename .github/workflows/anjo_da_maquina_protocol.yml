@@ -378,6 +378,29 @@ jobs:
         # "os.fork"・"os.forkpty"を追加した修正を、継続的に再検証する。
         if: success()
         run: python angels/zerachiel_process_spawn_guard.py
+      - name: 22.85. サキエルの水脈 (Sachiel's Waterway - os.sendfile/os.copy_file_rangeによるカーネル直接転送迂回検知)
+        # [新設 2026-10 §CD] sefer/__init__.pyのfd事前オープンバイパス
+        # 対策(os.write/os.pwrite/os.writev/os.pwritev の4系統のみを
+        # ラップ)は、§CBでmmap.__new__イベントを検査対象に加えた直後、
+        # 「カーネル側でfdからfdへ直接データを転送する別の経路はないか」
+        # を自問して発見した。os.sendfile()とos.copy_file_range()は
+        # いずれもCPythonのaudit eventを一切発生させないため、
+        # mmap.__new__のように「監査すべきイベントが存在するのに検査
+        # していなかった」のではなく、そもそも監査可能なイベント自体が
+        # 存在しなかった。Sanctumに入る前に確保した書き込み用fdへ、
+        # 別のfdからこの2関数で直接データを転送するだけで、例外を一切
+        # 発生させずにallowed_dirs外への書き込みができていた(実機
+        # 検証済み)。監査イベントが存在しない以上、既存のos.write系
+        # 4関数と同じ方針で、`os`モジュールのこの2関数自体をラップする
+        # 修正を、継続的に再検証する。[正直な注記] 同じ調査でPython
+        # ファイルオブジェクト(io.FileIO/BufferedWriter)の.write()も
+        # 同様に監査イベントを発生させず迂回できることを確認したが、
+        # CPythonの拡張型のためモンキーパッチ自体が不可能
+        # (TypeError: cannot set 'write' attribute of immutable type)
+        # であり、これは本防御方式(osモジュール関数のPython層ラップ)
+        # 自体の限界として正直に記録している(GRIMOIRE.md §CD参照)。
+        if: success()
+        run: python angels/sachiel_kernel_transfer_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

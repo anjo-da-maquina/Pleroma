@@ -567,6 +567,53 @@ def _guarded_os_pwritev(fd, buffers, offset, *a, **kw):
     _check_fd_write_allowed(fd, "os.pwritev")
     return _ORIG_OS_PWRITEV(fd, buffers, offset, *a, **kw)
 
+# [脆弱性修正 2026-10 §CD] os.sendfile / os.copy_file_range によるfd事前
+# オープンバイパス対策
+# -----------------------------------------------------------
+# 発見: §CBでmmapによるバイパスを塞いだ直後、「os.write系4関数以外に、
+# カーネル側でfdからfdへ直接データを転送する別の経路はないか」を自問し、
+# 実機で`sys.addaudithook`に生のコールバックを登録して検証したところ、
+# `os.sendfile(out_fd, in_fd, offset, count)` と
+# `os.copy_file_range(src, dst, count)` の両方が、**CPythonのaudit event
+# を一切発生させない**ことを確認した(mmap.__new__ のように検査漏れの
+# イベントが存在したのではなく、そもそも監査可能なイベント自体が存在
+# しない)。この2関数はいずれもカーネルの同名syscall相当を直接呼び、
+# ユーザー空間のバッファを経由しないため、os.write/pwrite/writev/pwritev
+# のいずれも一度も呼ばない。実機検証済み: allowed_dirs外のファイルに
+# ついて、Sanctumに入る前に確保した書き込み用fdへ、別のfdから
+# `os.sendfile`または`os.copy_file_range`で直接データを転送する攻撃が、
+# 例外を一切発生させずに成功し、ファイル内容が実際に書き換わることを
+# 確認した。
+#
+# 対応: 監査イベントが存在しない以上、既存のos.write系4関数と全く同じ
+# 方針で、`os`モジュールのこの2関数自体をラップし、書き込み先fd
+# (out_fd / dst)を既存の`_check_fd_write_allowed`に通す。
+#
+# [正直に残る限界] 同じ調査の過程で、Sanctumに入る「前」に確保した
+# Pythonファイルオブジェクト(`open(path, 'r+b')`等が返す
+# `io.FileIO`/`io.BufferedWriter`)の`.write()`メソッドも、同様に
+# 監査イベントを発生させず、本修正後もSanctumを完全に迂回して
+# 書き込めることを実機で確認した。これはCPythonの`_io`拡張型の
+# メソッドで、`io.FileIO.write = ...`のような通常の属性代入による
+# モンキーパッチが`TypeError: cannot set 'write' attribute of
+# immutable type '_io.FileIO'`で拒否されることも実機で確認しており
+# (ctypesで型オブジェクトのメモリを直接書き換えるような極めて脆い
+# 手段を除けば)、本ファイルが採用している「osモジュールの関数を
+# Python層でラップする」という設計そのものの限界に当たる。恒久対策
+# にはOSレベルのサンドボックス(seccomp等)が必要であり、この限界は
+# 既にファイル冒頭のコメントで述べている通り、意図的に正直に記録して
+# おく。
+_ORIG_OS_SENDFILE = getattr(os, "sendfile", None)
+_ORIG_OS_COPY_FILE_RANGE = getattr(os, "copy_file_range", None)
+
+def _guarded_os_sendfile(out_fd, in_fd, offset, count, *a, **kw):
+    _check_fd_write_allowed(out_fd, "os.sendfile")
+    return _ORIG_OS_SENDFILE(out_fd, in_fd, offset, count, *a, **kw)
+
+def _guarded_os_copy_file_range(src, dst, count, offset_src=None, offset_dst=None):
+    _check_fd_write_allowed(dst, "os.copy_file_range")
+    return _ORIG_OS_COPY_FILE_RANGE(src, dst, count, offset_src, offset_dst)
+
 def _create_awaken():
     _awakened = False
     def awaken():
@@ -581,6 +628,10 @@ def _create_awaken():
             os.pwrite = _guarded_os_pwrite
         if _ORIG_OS_PWRITEV:
             os.pwritev = _guarded_os_pwritev
+        if _ORIG_OS_SENDFILE:
+            os.sendfile = _guarded_os_sendfile
+        if _ORIG_OS_COPY_FILE_RANGE:
+            os.copy_file_range = _guarded_os_copy_file_range
         _awakened = True
     return awaken
 
