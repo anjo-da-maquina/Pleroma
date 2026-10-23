@@ -268,6 +268,53 @@ def _michael_absolute_defense(event: str, args: tuple):
                     _trigger_violation(event, args, f"Unauthorized network connection to '{target_host}'.")
             return
 
+        # 2.5. [脆弱性修正 2026-10 §CB] mmapによるfd書き込みバイパス対策
+        # -----------------------------------------------------------
+        # 発見: 「fd事前オープンによる書き込みバイパス対策」(459行目
+        # 周辺、`_guarded_os_write`等)は os.write/os.pwrite/os.writev/
+        # os.pwritev の4系統のみをラップしていた。しかし
+        # `mmap.mmap(fd, length, access=mmap.ACCESS_WRITE)` で、
+        # 「Sanctumに入る『前』に確保しておいた書き込み用fd」をメモリに
+        # マップし、`mm[0:N] = b'...'` のようなスライス代入をするだけで、
+        # os.write系APIを一切経由せずにファイルへ書き込める。これは
+        # os.write系とは別個の、CPythonの正式な監査イベント
+        # "mmap.__new__"を発生させるにもかかわらず、本関数はこの
+        # イベントを一度も検査していなかった(ハードデニー・ソケット・
+        # open/os.open・削除系・リネーム系のいずれにも一致せず、さらに
+        # 後述4のデフォルト拒否の`monitored_namespaces`にも"mmap."が
+        # 含まれていないため、完全に素通りしていた。実機検証済み:
+        # allowed_dirs外のファイルについて、Sanctumに入る前に確保した
+        # fdをmmapし、スライス代入で書き込む攻撃が、例外を一切発生
+        # させずに成功することを確認した)。
+        #
+        # [正直な注記] "mmap.__new__"イベントのargs[2](access)は、
+        # `access=`キーワードで構築した場合は要求した値(ACCESS_WRITE=2
+        # 等)を正しく報告するが、Unix系の`prot=`/`flags=`キーワードで
+        # 構築した場合は、実際にPROT_WRITEを要求していても常に0を報告
+        # することを実機で確認した(匿名mmap `mmap.mmap(-1, 100)`と
+        # 全く同じ値になり、両者はargs[2]だけでは判別不能)。そのため
+        # access値は書き込み意図の判定には信頼できない。本修正は宣言
+        # されたaccess値を一切信用せず、fd経由で解決した実体パスのみに
+        # 基づいて判定する、既存の`_check_fd_write_allowed`と同じ
+        # fail-closed方針を採用する: 実ファイルを指すfdでの非匿名mmapは
+        # access値に関わらず一律allowed_dirs内かどうかで判定する
+        # (匿名マッピング`fileno=-1`は実体ファイルを持たないため常に
+        # 許可する)。[既知の限界] これは宣言上「読み取り専用」の
+        # mmapであっても、allowed_dirs外のファイルに対しては一律遮断
+        # するという意味で、os.open/openの読み取り検査(restrict_reads
+        # 時のみ遮断)より厳しい。これはaccess値が信頼できない以上、
+        # 安全側に倒した意図的な設計判断である。
+        if event == "mmap.__new__":
+            fileno = args[0] if args else -1
+            if isinstance(fileno, int) and fileno >= 0 and fileno not in _WHITELISTED_FDS:
+                path = _resolve_fd_path(fileno)
+                if path is not None and not _is_path_allowed(path, policy["allowed_dirs"]):
+                    _trigger_violation(
+                        event, args,
+                        f"Unauthorized mmap access to '{path}' (fd={fileno}, pre-opened handle bypass via mmap)."
+                    )
+            return
+
         # 3. ファイル書き込み検査 (open / os.open)
         if event == "open":
             path = args[0]
