@@ -245,6 +245,92 @@ def test_os_fork_is_allowed_when_unsealed():
         assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
 
 
+def test_os_forkpty_is_blocked_while_sealed():
+    """
+    [§CC「残存する限界」の解消] §CCのGRIMOIRE記述では、`os.fork()`と
+    同じ修正でカバーされているはずの`os.forkpty()`について、CI環境での
+    プロセス管理上の不安定化を避けるため直接の実行確認を見送っていた。
+    実機で確認した結果、`os.forkpty()`も専用のaudit event"os.forkpty"
+    を発火し、`os.fork()`と全く同じ経路(forbidden集合)で正しく遮断
+    されることを確認した。
+    """
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    try:
+        try:
+            pid, fd = os.forkpty()
+            if pid == 0:
+                sys.stdout.flush()
+                os._exit(0)
+            else:
+                os.waitpid(pid, 0)
+                os.close(fd)
+            assert False, (
+                "修正前の欠陥が再発している: 封鎖中にos.forkpty()による"
+                "プロセス生成が深層保護をすり抜けて実行されてしまった。"
+            )
+        except mg.LossOfAtaraxia:
+            pass
+    finally:
+        mg.set_sanctuary_sealed(False)
+
+
+def test_fork_then_exec_combo_is_unreachable_while_sealed():
+    """
+    [§CC「残存する限界」の解消・核心] §CCのGRIMOIRE記述では、
+    「`os.fork()`後に子プロセスが`os.exec`系APIを呼ぶ複合的な攻撃
+    パターンについては、本セッションの環境では安全に実機検証
+    できなかった」と正直に明記していた(fork()後に子プロセス内で
+    さらに`os.execv()`を呼ぶ検証を試みた際、このClaude Codeの
+    実行サンドボックス自体が不安定化する事象を一度引き起こしたため)。
+
+    その後、完全に隔離された子プロセス(`subprocess.run`、標準入力を
+    `/dev/null`からリダイレクト、タイムアウト付き)の中でのみ`fork()`
+    を試みる、より安全な手順で再検証したところ、重要な事実が判明した:
+    `os.fork()`自体が§CCの修正によって封鎖中に遮断されるため、
+    「封鎖中に子プロセスが生まれて、その子プロセスがexecする」という
+    状況そのものが、`fork()`の時点で構造的に発生し得なくなっている。
+    すなわち、懸念していた複合攻撃は、個別にexecの遮断を確認する
+    必要すらなく、前提条件(fork)自体が塞がれたことで、根本的に
+    再現不可能になったことを、本テストで実際に確認する。
+    """
+    import subprocess
+
+    _repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    script = (
+        "import sys, os\n"
+        "sys.path.insert(0, " + repr(_repo_root) + ")\n"
+        "import maquina_gatekeeper as mg\n"
+        "mg._register_audit_hook_once()\n"
+        "mg.set_sanctuary_sealed(True)\n"
+        "try:\n"
+        "    pid = os.fork()\n"
+        "    if pid == 0:\n"
+        "        try:\n"
+        "            os.execv('/bin/true', ['/bin/true'])\n"
+        "        finally:\n"
+        "            sys.stdout.flush()\n"
+        "            os._exit(1)\n"
+        "    else:\n"
+        "        os.waitpid(pid, 0)\n"
+        "    print('RESULT: FORK_SUCCEEDED_BYPASS')\n"
+        "except mg.LossOfAtaraxia as e:\n"
+        "    print('RESULT: BLOCKED_AT_FORK: ' + str(e))\n"
+        "finally:\n"
+        "    mg.set_sanctuary_sealed(False)\n"
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True, text=True, timeout=15,
+        stdin=subprocess.DEVNULL,
+    )
+    assert "RESULT: BLOCKED_AT_FORK" in r.stdout, (
+        f"fork+execの複合攻撃の前提(fork)自体が遮断されなかった: "
+        f"stdout={r.stdout!r} stderr={r.stderr!r}"
+    )
+    assert "RESULT: FORK_SUCCEEDED_BYPASS" not in r.stdout
+
+
 def test_get_machine_id_is_not_a_constant_placeholder_on_linux():
     """[脆弱性修正の核心] GRIMOIRE.md §AS参照。以前の実装はWindows以外の
     プラットフォーム(本サンドボックスのLinuxを含む)では、ホストの識別
