@@ -365,6 +365,19 @@ jobs:
         # この修正を、両方の構築スタイルで継続的に再検証する。
         if: success()
         run: python angels/sealtiel_mmap_guard.py
+      - name: 22.84. ゼラキエルの産まれの検問 (Zerachiel's Birth-Watch - 深層保護のプロセス生成迂回検知)
+        # [新設 2026-10 §CC] maquina_gatekeeper.pyのultimate_audit_hook
+        # ("深層保護")は、新しいOSプロセスの生成を遮断する目的で
+        # "subprocess.Popen"/"os.system"/"os.exec"/"os.posix_spawn"を
+        # forbidden集合に含めていたが、同じ目的を達成できるos.fork()は
+        # 専用の別のaudit event"os.fork"を発火させるため、これらの
+        # いずれにも一致せず封鎖中でも完全に素通りしていた(別個に独立
+        # して存在するsefer/__init__.pyの_HARD_DENY_EVENTSは既に
+        # "os.fork"/"os.forkpty"を含んでいたが、本フックには反映されて
+        # いなかった、という§CAと同種の非対称性)。forbidden集合に
+        # "os.fork"・"os.forkpty"を追加した修正を、継続的に再検証する。
+        if: success()
+        run: python angels/zerachiel_process_spawn_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()

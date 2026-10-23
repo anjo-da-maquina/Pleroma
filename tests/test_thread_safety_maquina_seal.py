@@ -197,6 +197,54 @@ def test_udp_sendto_is_allowed_when_unsealed():
         s.close()
 
 
+def test_os_fork_is_blocked_while_sealed():
+    """
+    [脆弱性修正の回帰テスト・核心 §CC] 以前は`forbidden`集合に
+    "subprocess.Popen"/"os.system"/"os.exec"/"os.posix_spawn"という
+    「新しいプロセスを起動する」ことを目的とした複数のAPIが含まれて
+    いたが、同じ目的を達成できる`os.fork()`が発火する専用のaudit event
+    "os.fork"は含まれていなかった。実機で確認済み: 修正前は
+    `set_sanctuary_sealed(True)`の状態でも`os.fork()`が例外無しに成立
+    していた(別個に独立して存在する`sefer/__init__.py`の
+    `_HARD_DENY_EVENTS`は既に"os.fork"を遮断していたが、本ファイルの
+    `ultimate_audit_hook`には反映されていなかった)。
+    """
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    try:
+        try:
+            pid = os.fork()
+            if pid == 0:
+                # [正直な注記] 子プロセス側に処理が渡ってしまった時点で、
+                # このテストはどのみち失敗(親側のLossOfAtaraxiaが発生
+                # しなかった)ことになる。子プロセスがpytestの状態を
+                # そのまま引き継いで二重にテストを実行してしまうことを
+                # 避けるため、即座にos._exit()で終了させる。
+                os._exit(0)
+            else:
+                os.waitpid(pid, 0)
+            assert False, (
+                "修正前の欠陥が再発している: 封鎖中にos.fork()による"
+                "プロセス生成が深層保護をすり抜けて実行されてしまった。"
+            )
+        except mg.LossOfAtaraxia:
+            pass
+    finally:
+        mg.set_sanctuary_sealed(False)
+
+
+def test_os_fork_is_allowed_when_unsealed():
+    """[誤検知防止] 封鎖していない通常時は、os.fork()が誤って遮断されない。"""
+    mg._register_audit_hook_once()
+    assert mg.is_sanctuary_sealed() is False
+    pid = os.fork()
+    if pid == 0:
+        os._exit(0)
+    else:
+        _, status = os.waitpid(pid, 0)
+        assert os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0
+
+
 def test_get_machine_id_is_not_a_constant_placeholder_on_linux():
     """[脆弱性修正の核心] GRIMOIRE.md §AS参照。以前の実装はWindows以外の
     プラットフォーム(本サンドボックスのLinuxを含む)では、ホストの識別
