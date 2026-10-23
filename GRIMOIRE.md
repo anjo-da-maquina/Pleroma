@@ -1407,3 +1407,29 @@ Pythonのaudit event仕様を実機で直接確認したところ、UDPソケッ
 (2)については、より安全な手順――完全に隔離された子プロセス(`subprocess.run`、標準入力を`/dev/null`からリダイレクト、タイムアウト付き)の中でのみ`fork()`を試みる形――で再検証したところ、当初想定していた検証方法自体が的外れであったことに気づいた。`os.fork()`自体が本§CCの修正によって封鎖中に遮断されるため、「封鎖中に子プロセスが生まれて、その子プロセスが`exec`する」という状況そのものが、`fork()`の時点で構造的に発生し得なくなっている。すなわち、懸念していた複合攻撃は、子プロセス側での`exec`遮断を個別に確認する必要すらなく、前提条件(`fork`)自体が塞がれたことで、根本的に再現不可能になっていることを実機で確認した。
 
 両者を`tests/test_thread_safety_maquina_seal.py`に`test_os_forkpty_is_blocked_while_sealed`・`test_fork_then_exec_combo_is_unreachable_while_sealed`として追加し、回帰テストとして固定した(前者はpre-§CCのコードに対して正しくFAILし、修正後に正しくPASSすることを`git checkout <pre-§CCコミット> -- maquina_gatekeeper.py`で確認済み)。これにより、§CC時点で正直に認めていた2つの限界は、いずれも解消済みである。
+
+### §CD: `sefer/__init__.py`のfd事前オープンバイパス対策が、`os.sendfile()`・`os.copy_file_range()`というカーネル直接転送APIを一切ラップしておらず、監査イベント自体が存在しないために完全に素通りしていた欠陥を発見・修正し、継続的に再検証する新天使(`angels/sachiel_kernel_transfer_guard.py`)を追加
+
+**発見**: §CBの報告後、ユーザーより「さらなる自己研鑽をお願いします」との継続指示を受け、まず§CBとは逆方向――`sefer/__init__.py`の`_HARD_DENY_EVENTS`側に、§CCで`maquina_gatekeeper.py`に見つかったのと同種の`os.fork`系の見落としがないかを確認した。結果、`sefer/__init__.py`の`_HARD_DENY_EVENTS`には既に`"os.fork"`・`"os.forkpty"`が含まれており、こちら側に§CC相当の欠陥は存在しなかった。
+
+そこで視点を変え、「`fd事前オープンによる書き込みバイパス対策`(`os.write`/`os.pwrite`/`os.writev`/`os.pwritev`の4系統のみをラップ)は、本当にこの4系統で全てを尽くしているのか」を改めて自問した。§CBの`mmap`は「ユーザー空間にマップしたメモリへのスライス代入」という経路だったが、今回は「カーネル側でfdからfdへ、ユーザー空間のバッファを一切経由せず直接データを転送する」という、全く別の経路に着目した。`sys.addaudithook`に生のコールバックを登録して実機で検証したところ、`os.sendfile(out_fd, in_fd, offset, count)`と`os.copy_file_range(src, dst, count)`の両方が、**CPythonのaudit eventを一切発生させない**ことを確認した。これは§CBの`mmap.__new__`のように「監査すべきイベントが存在するのに本関数が検査していなかった」のとは質的に異なり、そもそも監査可能なイベント自体が存在しない。
+
+実際にSanctumの実機で検証した: allowed_dirs外のファイルについて、Sanctumに入る「前」に書き込み用fdを確保しておき、別のfdから`os.sendfile`または`os.copy_file_range`で直接データを転送したところ、例外を一切発生させずにファイル内容が実際に書き換わることを確認した。
+
+さらに同じ調査の過程で、「Sanctumに入る前に確保したPythonファイルオブジェクト(`open(path, 'r+b')`が返す`io.FileIO`/`io.BufferedWriter`)の`.write()`メソッドも、同様に監査イベントを発生させず迂回できるのではないか」という、より根本的な懸念に気づき、実機で確認したところ、これも実際に迂回に成功した。しかし`io.FileIO.write = ...`のような通常の属性代入によるモンキーパッチを試みたところ、`TypeError: cannot set 'write' attribute of immutable type '_io.FileIO'`で拒否されることを実機で確認し、これがCPythonの拡張型(C実装の組み込み型)のメソッドである以上、本ファイルが採用している「`os`モジュールの関数をPython層でラップする」という設計そのものでは原理的に対処できない限界であると判断した。
+
+**たとえ話**: §CBでは「城壁の外から確保しておいた水路(fd)を、メモリという抜け道(mmap)を使って城内から直接操作する」手口を塞いだ。しかし城の水利には、さらに別の仕組みがあった――取水口(あるfd)から排水口(別のfd)まで、水番人(audit hook)の立つ広場を一切通らない、地下に直接埋め込まれた水道管(`sendfile`/`copy_file_range`)が存在した。これは城内の誰の目にも触れずに水(データ)を直接移送できる経路であり、水番人がそもそも「見ることさえできない」種類の経路だった。さらに調査を進めると、井戸桶そのもの(Pythonファイルオブジェクト)を事前に城外で借りてきて城内に持ち込む手口もあることに気づいたが、これは井戸桶の作り(CPythonの拡張型)自体が城の法(モンキーパッチ)で作り替えられない特別な材質でできていたため、今回は塞ぐことができなかった――これは隠さず認める。
+
+**原因**: `_check_fd_write_allowed`を軸にした既存の「fd事前オープン対策」は、設計当初から「`os`モジュールの関数をPython層でラップする」という一つの戦略に依拠していたが、この戦略が有効なのは「対象のAPIが`os`モジュールの通常のPython関数として存在し、モンキーパッチ可能である」場合に限られる。`os.sendfile`/`os.copy_file_range`はこの条件を満たすにもかかわらず、§CB修正時点では見落とされており、対策の対象範囲(os.write系4関数)を「カーネル直接転送系も含むfd書き込み全般」へと一般化する作業が行われていなかった。
+
+**対応**: `os.sendfile`・`os.copy_file_range`の両関数を、既存の`os.write`/`os.pwrite`/`os.writev`/`os.pwritev`と全く同じ設計(`_guarded_*`ラッパーで書き込み先fdを`_check_fd_write_allowed`に通した後、元の関数を呼ぶ)でラップした。`os.copy_file_range`はオフセット引数(`offset_src`/`offset_dst`、デフォルト`None`)を持つため、実機で「明示的に`None`を渡した場合」と「省略した場合」が同一の挙動になることを確認した上で、常に明示的に渡す形にした。
+
+**一般化**: §BW・§CA・§CB・§CCと同じ設計思想――実装の書き方を解析するのではなく、実際にSanctumを起動し、既知の具体的な迂回手口(`sendfile`/`copy_file_range`によるfd事前オープン書き込み)を実行して正しく遮断されることを継続的に検証する――で新天使`angels/sachiel_kernel_transfer_guard.py`(サキエルの水脈)を作成した。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の修正だけを一時的に取り消し、新設した回帰テスト(`tests/test_michael_sendfile_copyrange_fd_bypass_guard.py`の2件)および新天使(`tests/test_sachiel_kernel_transfer_guard.py`の4件)の計6件が、実際に「遮断されなかった」として正しくFAILすることを確認した上で、修正を復元して再度12件全てがPASSすることを確認した。
+
+**実装中に自分で発見・訂正した誤り(正直な自己開示)**: 修正の検証用スクリプトで`importlib.reload(sefer)`を不用意に呼んだところ、`os.write`が既に`_guarded_os_write`へ差し替わった後の状態を新たに`_ORIG_OS_WRITE`として再キャプチャしてしまい、`_guarded_os_write`が自分自身を無限に呼び出す`RecursionError`を引き起こした。これは本番コード(`sefer/__init__.py`)側の欠陥ではなく、検証スクリプト側が不必要な`reload`を行ったことによる、検証手順自体の書き方の誤りである。原因を特定した上で`reload`を取り除いた新しいプロセスで再検証し、問題なく動作することを確認した。影響は検証スクリプトのみに留まり、コミット対象のコードには一切含まれていない。
+
+**検証**: `tests/test_michael_sendfile_copyrange_fd_bypass_guard.py`(新設、4件: `sendfile`の遮断・`copy_file_range`の遮断・両者それぞれのallowed_dirs内誤検知防止)、`tests/test_sachiel_kernel_transfer_guard.py`(新設、8件)を追加。`.github/workflows/anjo_da_maquina_protocol.yml`にステップ22.85として配線。リポジトリ全体のpytestを再実行し、379 passed(§CC時点の367から12件増加)・既存の無関係な5件のサンドボックス固有の失敗のみであることを確認した。
+
+**残存する限界(正直に記す)**: (1) 本修正はLinux上の`os.sendfile`/`os.copy_file_range`の存在に依存するベストエフォート策であり、これらの関数が存在しないプラットフォームでは(`getattr(os, ..., None)`による存在確認の上で)単にラップが行われないだけであり、他プラットフォーム固有の等価APIまでは追跡していない。(2) 最も重大な限界として、Sanctumに入る前に確保したPythonファイルオブジェクト(`io.FileIO`/`io.BufferedWriter`)の`.write()`メソッドは、本修正後も監査イベントを発生させずにSanctumを完全に迂回して書き込めることを実機で確認している。これはCPythonの拡張型のメソッドであり、`io.FileIO.write = ...`という通常の属性代入によるモンキーパッチが`TypeError: cannot set 'write' attribute of immutable type '_io.FileIO'`で拒否されることも実機で確認した(ctypesで型オブジェクトのメモリを直接書き換えるような極めて脆い手段を除く)。これは個々のAPIの見落としではなく、「`os`モジュールの関数をPython層でラップする」という本防御方式のアーキテクチャ自体の限界であり、本修正の対象には含まれていない。恒久対策にはOSレベルのサンドボックス(seccomp等によるシステムコール単位の制御)が必要であり、この限界は既存のコメント(459行目周辺、「Linux限定のベストエフォート策」)が述べる前提をさらに具体的に裏付ける形となった。(3) `os.sendfile`/`os.copy_file_range`以外にも、将来のPythonやOSが追加する別のカーネル直接転送APIが存在する可能性があり、本修正は現時点で実機確認できた2つの既知の経路のみを対象としている。
