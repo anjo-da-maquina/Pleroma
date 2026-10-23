@@ -1,19 +1,48 @@
-﻿# Pleroma (anjo-da-maquina)
+﻿# Pleroma — 生成AIが作る成果物の品質を、QAエンジニアの視点で検証し続ける個人プロジェクト
 
-Pleroma is an autonomous zero-trust security framework designed for AI-driven development. It establishes an absolute defense layer against AI hallucinations, prompt injections, and data exfiltration through continuous red/blue teaming (GAN).
+[English README](./README.en.md) ・ [開発ログ(読み物版)](./DEVLOG.md) ・ [全記録(GRIMOIRE.md)](./GRIMOIRE.md)
 
-## 🛡️ The Archangel Architecture
+## なぜ作ったか
 
-- **Sefer (The Core Defense):** The absolute firewall that hooks deep into the Python interpreter.
-- **Michael (OS & Network Mirage):** Intercepts destructive OS calls (`os.remove`), fd-level write bypass attempts (`os.write`/`os.pwrite` on pre-opened handles), and unauthorized network connections. File **reads** outside allowed directories are blocked only when `restrict_reads=True` is explicitly set (off by default for backward compatibility) — see `GRIMOIRE.md §5 既知の限界` for the full, honest scope of what this hook-based layer can and cannot see.
-- **Gabriel (AST Inquisition):** Performs deep Abstract Syntax Tree (AST) scanning to block malicious imports and dynamic code execution (e.g., `eval`, `getattr`).
-- **Raphael (Sanctuary Monitor):** Validates the environment to prevent debugger attachments and CI spoofing.
+私はQAエンジニアです。生成AIが書くコードや、AIエージェントが自律的に運用するシステムが急速に増える中で、「その品質は誰が、どうやって継続的に保証するのか」という問いに、個人的な危機意識を持っていました。
 
-## ⚔️ The Armageddon Engine
-An autonomous evolution cycle where **Lucifer (Red Team AI)** continuously forges new attack mutations, while **Metatron (Blue Team / QA Evaluator)** analyzes breaches and scores the attack complexity. New seal proposals are queued to `sefer/raziel_ledger_pending.json` for **mandatory human review** (`tools/promote_ledger_seal.py`) before ever reaching the live ledger (`raziel_ledger.json`) — unvalidated LLM output is never applied directly to production rules.
+AIは説得力のある嘘をつきます。「対策しました」と報告するコードが、実は一文字違いで無力化していたり、片方の防御層だけ直して、構造的に並行しているもう一方の防御層には知見が共有されていなかったり——そういう「動いているように見えるが、実は動いていない」状態を、どうやって見つけ、どうやって見つけ続けるか。
 
-## 📜 Akashic Records
-All combat history, generated payloads, and QA scores are persistently recorded to track the evolution of both the AI's offensive capabilities and the system's defensive resilience.
+Pleromaは、その問いに自分の手で向き合うための実験場です。AIエージェント(自分自身を含む)が書いたコードを、AIエージェント自身に、QAの手続きとして赤チーム/青チームの反復で検証させ、発見した欠陥を一つずつ、実機で確認し、修正し、再発しないことをCIに刻み込む——というサイクルを、継続的に積み重ねています。
 
-## 📖 Commands
-See `COMMANDS.md` for the full operator command reference (arena runs, test suite, certificate reissuance, emergency ledger reset).
+## やっていること
+
+- **赤青チームの反復**: 新しい攻撃パターンを見つけ(赤)→実機で本当に突破できるか検証し→直し→同じ手口が再発しないことを検証する天使(青、CIチェック)を1体ずつ増やしていく。
+- **多層防御のアーキテクチャ**: ファイル書き込み制限(Sanctum)・プロセス起動やネットワーク通信の遮断(深層保護)・静的解析によるコードレビュー(Gabriel)という、独立して保守される複数の防御層。
+- **「対策したつもり」を機械的に潰す**: 見つけた欠陥は個別に直すだけでなく、必ず汎用的なCIチェック(天使)に変換し、`git stash`で修正前の状態に戻すと検知が正しくFAILし、戻すと正しくPASSすることまで、毎回自分の手で確認する。
+- **誠実さそのものをQA対象にする**: 「実機で検証していないものは報告しない」「自分の新しいコードの欠陥も隠さず記録する」というルールを、ログ(`GRIMOIRE.md`)に徹底する。自分自身の見落としや、自分が書いたテストの実装ミスも、見つけた瞬間にそのまま記録している。
+
+## 現在地(数値で)
+
+| 項目 | 現状 |
+| --- | --- |
+| 発見・修正ログ(`GRIMOIRE.md`) | §A 〜 §CC まで、81件 |
+| 継続監査する「天使」(CIチェック) | 約50体 |
+| GitHub Actions ワークフロー | 2本、いずれも成功 |
+| ローカルpytest | 367件合格(既知のサンドボックス固有5件のみ失敗) |
+
+## 直近の発見例
+
+いずれも「意図は同じだが、別のAPI名を使うだけで防御の網をすり抜けられる」という、同じ構造の欠陥です。
+
+- **UDP `socket.sendto()` による情報持ち出し**: ネットワーク遮断が `"socket.connect"` だけに依存しており、接続不要のUDP送信が素通りしていた。
+- **`mmap` によるファイル書き込み制限の迂回**: 事前に確保したファイルディスクリプタを `mmap` でマップして書き込むだけで、既存の書き込み制限APIラッパーをすべて迂回できた。しかも「書き込み権限」を示す監査情報自体が偽装可能だったため、権限情報を信用しない設計に変更した。
+- **`os.fork()` によるプロセス生成の素通り**: プロセス起動の遮断が `subprocess.Popen` 等の4つのAPIだけを個別に塞いでおり、`os.fork()` という別の手段が漏れていた。
+
+詳しい経緯(発見・たとえ話・原因・対応・検証・正直に残る限界)は [GRIMOIRE.md](./GRIMOIRE.md) に、読みやすく再構成したものは [DEVLOG.md](./DEVLOG.md) にあります。
+
+## 構成
+
+- **Sefer(経典)**: `sefer/` — Sanctumコンテキストによるファイルアクセス制限。配布可能な防御モジュール本体。
+- **Maquina Gatekeeper**: `maquina_gatekeeper.py` — プロセス起動・ネットワーク通信を遮断する、独立したもう一つの深層防御層。
+- **Tartarus(闘技場)**: `tartarus/` — 赤チームAIと青チームAIが自己対戦する、ローカル限定の進化ループ。
+- **Angels(天使たち)**: `angels/` — 約50体の継続監査スクリプト。`.github/workflows/anjo_da_maquina_protocol.yml` でpushごとに実行される。
+
+## コマンド
+
+運用コマンドの一覧は [`COMMANDS.md`](./COMMANDS.md) を参照してください。
