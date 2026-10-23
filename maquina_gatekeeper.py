@@ -134,8 +134,28 @@ def _register_audit_hook_once():
         # §BWの「等価構文によるブロックリスト回避」(import os.path)と
         # 同種の構造――禁止したい意図(外部への通信・データ送信)は同じ
         # なのに、別のAPIを使うだけで素通りしてしまうパターンである。
+        #
+        # [脆弱性修正 2026-10 §CC] forbidden集合は"subprocess.Popen"/
+        # "os.system"/"os.exec"/"os.posix_spawn"という「新しいプロセスを
+        # 起動する」ことを目的とした複数のAPIを列挙していたが、同じ目的
+        # (新しいOSプロセスを生成する)を達成できる`os.fork()`が発火する
+        # 専用のaudit event"os.fork"(および`os.forkpty()`の"os.forkpty")
+        # が、この列挙から漏れていたことを実機で確認した
+        # (`set_sanctuary_sealed(True)`の状態でも`os.fork()`が例外無しで
+        # 成立することを確認済み)。これは本ファイルとは別個に独立して
+        # 存在する`sefer/__init__.py`の`_HARD_DENY_EVENTS`が既に
+        # "os.fork"/"os.forkpty"を含んでいたにもかかわらず、本フック
+        # (`ultimate_audit_hook`)には反映されていなかった――2つの監査
+        # フックが構造的に並行しているが共有されていないため、片方の
+        # 対策が他方に自動的には及ばない、という本リポジトリで繰り返し
+        # 確認されているパターンと同一である。fork()単体は`os.exec`を
+        # 伴わなくても、子プロセスが親と無関係に(例えば親の実行時間
+        # 制限やプロセス監視の対象外で)動き続けられる新しいOSプロセスを
+        # 生成してしまうため、"新しいプロセスの起動を許さない"という
+        # forbidden集合の意図が、この経路だけ素通りしていた。
         forbidden = {
             "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
+            "os.fork", "os.forkpty",
             "socket.connect", "socket.sendto",
         }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):
