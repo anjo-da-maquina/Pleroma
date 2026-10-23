@@ -401,6 +401,49 @@ jobs:
         # 自体の限界として正直に記録している(GRIMOIRE.md §CD参照)。
         if: success()
         run: python angels/sachiel_kernel_transfer_guard.py
+      - name: 22.86. シャムエルの影断ち (Chamuel's Shadow-Cut - ctypes.dlopen/dlsymによる深層保護の監査回避バイパス検知)
+        # [新設 2026-10 §CE] maquina_gatekeeper.pyのultimate_audit_hookは、
+        # `event == "import" and args[0] in {"ctypes", ...}`で、封鎖中に
+        # 新たに`ctypes`をimportすること自体を遮断していた。しかし
+        # `ctypes`が封鎖の『前』に(本プロセス内の無関係な他のコードに
+        # よってでも)一度でもimportされていれば、攻撃者は封鎖後に改めて
+        # importし直す必要が一切ない。既にimport済みの`ctypes`から
+        # `ctypes.pythonapi`(実行中のPythonインタプリタ自身への既存
+        # ハンドル)や、新たに`ctypes.CDLL(None)`で取得したlibcハンドル
+        # からシンボルを解決する操作(それぞれ"ctypes.dlsym"・
+        # "ctypes.dlopen"という専用のaudit eventを発生させる)のいずれも、
+        # forbidden集合とは一度も一致せず、封鎖中でも完全に素通りして
+        # いた(実機検証済み)。
+        #
+        # [正直な自己訂正の記録] 調査の初期段階では「ctypes.pythonapi
+        # へのシンボル解決はいかなる場合も監査イベントを一切発生させ
+        # ない」という誤った前提のもとで、sefer/__init__.py側も同じ
+        # 脆弱性を持つと疑い、両ファイルのctypes.pythonapiクラスを
+        # 動的に差し替える大がかりな修正を一度実装した。しかし
+        # maquina_gatekeeper側でより広い攻撃(新規ctypes.CDLL(None))を
+        # 検証した際、その狭いpythonapi限定の修正では対応できないことに
+        # 気づき、イベント捕捉のリセット位置をシンボル解決『直前』に
+        # 絞り込んで再検証したところ、シンボル解決自体は実際には
+        # "ctypes.dlsym"という本物のイベントを発生させていることが
+        # 判明した。sefer/__init__.pyの既存の未変更コードで直接確認した
+        # ところ、このイベントは同ファイルの名前空間ごとのデフォルト
+        # 拒否(`event.startswith("ctypes.")`)によって既に正しく遮断
+        # されていた。これを受け、両ファイルへの大がかりな修正は全て
+        # 取り消し(git checkout --)、maquina_gatekeeper.py側の
+        # forbidden集合に"ctypes.dlopen"・"ctypes.dlsym"を追加するだけ
+        # の、より単純かつ十分に一般的な修正に改めた。sefer側は
+        # (個々のイベント名列挙ではなく名前空間ごとの広いdefault-deny
+        # 方式を採用しているため)この欠陥の対象ではなく、一切の変更を
+        # 加えていない。この非対称性は§CAの教訓と同種のものである。
+        #
+        # [正直な注記: 本検査の限界] Sanctumに入る『前』に関数ポインタ
+        # 自体を解決・変数に保存しておけば、その後の呼び出し自体は
+        # 新たなaudit eventを一切発生させないため(実機で確認済み)、
+        # 本修正・本天使のいずれもこれには及ばない。これは本防御方式
+        # (audit hookベースの検査)自体の限界であり、恒久対策には
+        # OSレベルのサンドボックスが必要である。
+        if: success()
+        run: python angels/chamuel_dlsym_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
