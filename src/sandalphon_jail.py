@@ -90,6 +90,24 @@ def run_in_sandalphon(code: str, timeout: int = 5) -> dict:
         tf.write(code)
         tmp_path = Path(tf.name)
 
+    # [自己発見・緊急修正 2026-10 §CF-1] `tempfile.NamedTemporaryFile`は
+    # 既定でモード0600(所有者のみ読み書き可)でファイルを作成する。
+    # これまでコンテナ内の`--cap-drop=ALL`導入前は、Dockerの既定の
+    # ケーパビリティ集合に含まれる`CAP_DAC_OVERRIDE`(通常のファイル
+    # 権限チェックを無視できる特権)により、ホスト側の所有者(このプロ
+    # セスの実行uid)とは異なるコンテナ内の`prisoner`ユーザーでも、この
+    # 0600ファイルを読み取れてしまっていた――すなわち、このコードは
+    # 気づかないうちにCAP_DAC_OVERRIDEに依存していた。`--cap-drop=ALL`
+    # を追加した直後、実際にGitHub Actions上でこの隔離結界を動的に検証
+    # したところ、`prisoner`ユーザーが`/jail/target.py`を開けず
+    # `PermissionError: [Errno 13] Permission denied`で失敗することを
+    # 実機で発見した(GRIMOIRE.md §CF追記参照)。これは正規の実行まで
+    # 一律に失敗させてしまう、本修正自身が引き起こした退行である。
+    # ケーパビリティに頼らず、通常のUNIXファイル権限だけで「全ユーザー
+    # 読み取り可」にすることで、CAP_DAC_OVERRIDEを復活させずに解決する
+    # (`:ro`でのbind mountにより書き込みは引き続き一切できない)。
+    os.chmod(tmp_path, 0o644)
+
     try:
         run_cmd = [
             "docker", "run", "--rm",

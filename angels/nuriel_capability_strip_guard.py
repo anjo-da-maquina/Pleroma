@@ -107,6 +107,11 @@ def _check_dynamic_capability_is_actually_dropped():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tf:
         tf.write(script)
         tmp_path = tf.name
+    # [自己発見・緊急修正 2026-10 §CF-1] src/sandalphon_jail.py側と同じ
+    # 理由(CAP_DAC_OVERRIDE剥奪後、既定モード0600のままでは`prisoner`
+    # ユーザーがこのファイルを開けずPermission deniedになる)で、ここも
+    # 同様にchmodする。GRIMOIRE.md §CF追記参照。
+    os.chmod(tmp_path, 0o644)
     try:
         run_cmd = [
             "docker", "run", "--rm",
