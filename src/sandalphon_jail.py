@@ -95,6 +95,30 @@ def run_in_sandalphon(code: str, timeout: int = 5) -> dict:
             "docker", "run", "--rm",
             "--network", "none",
             "--read-only",
+            # [新設 2026-10 §CF] これまでSandalphonの隔離は「ネットワーク
+            # 完全遮断・読み取り専用・非rootユーザー」の3点のみに依存して
+            # いたが、コンテナ自体にはDockerの既定のLinuxケーパビリティ
+            # 集合(CAP_DAC_OVERRIDE・CAP_SETUID・CAP_SETGID・
+            # CAP_SYS_CHROOT・CAP_NET_RAW等)がそのまま残っており、万一
+            # 隔離結界の内部で任意コード実行を許してしまった場合、
+            # これらのケーパビリティを使ってファイル権限チェックの迂回
+            # (CAP_DAC_OVERRIDE)やuid/gidの変更(CAP_SETUID/SETGID)が
+            # 理論上可能な状態だった。本隔離結界(1回限りの使い捨て
+            # スクリプト実行)には、いかなるLinuxケーパビリティも正当な
+            # 必要性が無いため、全て剥奪する。また、`no-new-privileges`
+            # を付与し、setuid/setgidビットの付いたバイナリやファイル
+            # ケーパビリティによる特権昇格を、カーネルレベルで一切
+            # 不可能にする。これらはPython層のaudit hook
+            # (sefer/maquina_gatekeeper)とは独立した、カーネルが直接
+            # 強制するOSレベルの防御であり、Sanctumに入る『前』に
+            # 解決済みのfd・関数ポインタを使った既知の迂回手口(§CD・§CE)
+            # に対しても、「迂回に成功した後にできる操作」そのものを
+            # 狭める効果がある。さらに`pids-limit`で、fork爆弾等による
+            # プロセス数の無制限な増加(ホスト側のPIDテーブル枯渇という
+            # サービス拒否攻撃)を防ぐ。
+            "--cap-drop=ALL",
+            "--security-opt=no-new-privileges",
+            "--pids-limit=32",
             "-v", f"{tmp_path}:/jail/target.py:ro",
             _SANDALPHON_IMAGE, "target.py",
         ]

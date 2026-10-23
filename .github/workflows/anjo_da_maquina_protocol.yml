@@ -444,6 +444,38 @@ jobs:
         # OSレベルのサンドボックスが必要である。
         if: success()
         run: python angels/chamuel_dlsym_guard.py
+      - name: 22.87. ヌリエルの剥奪 (Nuriel's Stripping - サンダルフォン隔離結界のLinuxケーパビリティ・特権昇格の恒久的剥奪)
+        # [新設 2026-10 §CF] §CD・§CEで繰り返し正直に記録してきた通り、
+        # Python層のaudit hook(sefer/maquina_gatekeeper)には構造的な
+        # 限界がある――Sanctumに入る『前』に確保済みのfdや関数ポインタ
+        # を使った操作は、以後いかなる新たな監査イベントも発生させずに
+        # 素通りする。これは「城内に関所を増やす」方式そのものの限界で
+        # あり、恒久対策には「城を囲む外壁」すなわちOSレベル(カーネル
+        # レベル)の強制が必要であると記してきた。本件はユーザーからその
+        # 恒久対策への着手を依頼され、既存のOSレベル隔離結界
+        # (`src/sandalphon_jail.py`のSandalphon、Dockerコンテナ内での
+        # 動的実行検証)を調査した結果の修正である。
+        #
+        # 実際のdocker run呼び出しを確認したところ、ネットワーク完全
+        # 遮断・読み取り専用・非rootユーザーの3点にしか依存しておらず、
+        # コンテナ自体にはDockerの既定のLinuxケーパビリティ集合
+        # (CAP_DAC_OVERRIDE・CAP_SETUID等、ファイル権限チェックの迂回や
+        # uid/gid変更を可能にする)がそのまま残っていた。使い捨てスク
+        # リプト実行にこれらの正当な必要性は無いため、`--cap-drop=ALL`・
+        # `--security-opt=no-new-privileges`・`--pids-limit`を追加した。
+        #
+        # [正直な注記] この検査環境(クラウドサンドボックス)はコンテナ
+        # レジストリへの出口ネットワークが許可一覧で遮断されており、
+        # `python:3.11-alpine`イメージの取得自体が実機で403 Forbiddenと
+        # なることを確認済みである。そのため本天使は、この環境では常に
+        # 実行できる静的検証(3オプションの存在確認)のみをPASS/FAILで
+        # 判定し、実際にコンテナを起動してケーパビリティ剥奪がカーネル
+        # によって本当に強制されているかの動的検証は、INCONCLUSIVE(PASS
+        # への偽装なし)として正直に報告する。インターネットに到達できる
+        # 実際のGitHub Actions環境でこの動的検証が実際にPASSすることを
+        # 継続的に確認する。
+        if: success()
+        run: python angels/nuriel_capability_strip_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
