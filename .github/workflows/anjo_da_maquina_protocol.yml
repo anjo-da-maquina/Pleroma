@@ -14,7 +14,10 @@ on:
 jobs:
   angelic-audit:
     name: 聖なる統合監査 (Angelic Zero-Trust Audit)
-    runs-on: ubuntu-latest
+    # [緊急修正 2026-10 §CH] .github/workflows/sanctuary_ci.ymlと同じ理由
+    # (Ubuntu 26移行とPlaywright 1.56.0の非対応による依存関係インストール
+    # 失敗、GRIMOIRE.md §CH参照)で、既知の安定イメージへ明示的に固定した。
+    runs-on: ubuntu-22.04
 
     steps:
       - name: 1. 聖域の準備 (Checkout Repository)

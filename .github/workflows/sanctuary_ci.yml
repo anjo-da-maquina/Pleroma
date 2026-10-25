@@ -8,7 +8,20 @@ on:
 
 jobs:
   verify_ataraxia:
-    runs-on: ubuntu-latest
+    # [緊急修正 2026-10 §CH] ユーザーが実際にGitHub Actions上のログを確認し、
+    # 教えてくれたことで発見した退行。GitHubの`ubuntu-latest`ランナーが
+    # 2026年10月19日からUbuntu 26へ移行し始めたことを、本ワークフロー自身の
+    # annotationが警告していたが、実際に今回(10月25日)その移行の影響を
+    # 受けた。`requirements.txt`で固定していたPlaywright 1.56.0が
+    # `ubuntu26.04-x64`でのchromiumインストールに対応しておらず、
+    # `playwright install chromium --with-deps`が
+    # `ERROR: Playwright does not support chromium on ubuntu26.04-x64`で
+    # 失敗し、依存関係インストール全体(したがって本ワークフロー全体)が
+    # §CGとは無関係にブロックされていた。Playwrightパッケージ自体の
+    # バージョンを無検証で上げるより、まだ広く安定運用されている既知の
+    # イメージへ明示的に固定する方が、変更の影響範囲が狭く安全であるため、
+    # `ubuntu-22.04`へ固定した。
+    runs-on: ubuntu-22.04
     # [修正 2026-10 §BQ] 本ジョブが失敗した際、原因の詳細(pytestの具体的な
     # 失敗箇所・トレースバック)を取得する手段がなかった。「Execute Sanctuary
     # Verification」ステップの生ログは、GitHub Actions内部の一時blobストレージ
