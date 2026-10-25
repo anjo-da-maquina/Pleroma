@@ -11,6 +11,7 @@ from pathlib import Path
 # 強制的（mandatory）な動的検証に使えるようにする。
 _SANDALPHON_IMAGE = "sandalphon-jail"
 _SANDALPHON_DOCKERFILE_DIR = Path(__file__).resolve().parent / "sandalphon"
+_SANDALPHON_SECCOMP_PROFILE = _SANDALPHON_DOCKERFILE_DIR / "seccomp-profile.json"
 
 
 def check_docker_available() -> tuple[bool, str]:
@@ -137,6 +138,20 @@ def run_in_sandalphon(code: str, timeout: int = 5) -> dict:
             "--cap-drop=ALL",
             "--security-opt=no-new-privileges",
             "--pids-limit=32",
+            # [新設 2026-10 §CG] §CFで取り上げたLinuxケーパビリティは
+            # 「root相当の特権の有無」を制御するが、「どのシステムコール
+            # 自体を呼べるか」は制御しない――無権限プロセスのままでも
+            # fork/clone/execve/ptrace/mount/socket等は、特権を一切使わ
+            # ずに呼べてしまう。§CD・§CEで発見した「Sanctumに入る前に
+            # 確保済みのfd・関数ポインタを使った迂回」は、まさにこの
+            # 「無権限のままでも到達できるシステムコール」の範疇にある。
+            # seccompプロファイル(src/sandalphon/seccomp-profile.json)
+            # は、カーネルレベルでこれらのシステムコール自体を直接
+            # 拒否する、ケーパビリティ剥奪とは独立したもう一枚の壁で
+            # ある。プロファイルの設計方針・denylist各項目の根拠は
+            # 当該JSONファイル内のcommentフィールドとGRIMOIRE.md §CG
+            # に詳述している。
+            f"--security-opt=seccomp={_SANDALPHON_SECCOMP_PROFILE}",
             "-v", f"{tmp_path}:/jail/target.py:ro",
             _SANDALPHON_IMAGE, "target.py",
         ]

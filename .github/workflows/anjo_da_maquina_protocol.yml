@@ -476,6 +476,53 @@ jobs:
         # 継続的に確認する。
         if: success()
         run: python angels/nuriel_capability_strip_guard.py
+      - name: 22.88. ドミニオンの統治 (Dominions' Dominion - seccompによるシステムコール次元のカーネルレベル支配の検知)
+        # [新設 2026-10 §CG] §CFのLinuxケーパビリティ剥奪は「root相当の
+        # 特権の有無」を制御するが、「どのシステムコール自体を呼べるか」
+        # は制御しない――§CD・§CEで発見した「Sanctumに入る前に確保済みの
+        # fd・関数ポインタを使った迂回」は、特権を一切必要とせず、無権限
+        # プロセスのままでも到達できるシステムコールの範疇にある。
+        #
+        # `src/sandalphon/seccomp-profile.json`(denylist方式のseccomp
+        # プロファイル)を新設し、`run_in_sandalphon()`の`docker run`へ
+        # `--security-opt=seccomp=...`で適用した。プロセス生成・ptrace・
+        # mount・カーネルモジュール・特権関連・生ソケット(--network none
+        # の上の多層防御)・時刻変更・NUMA/keyringといった、危険だが
+        # 良性のスクリプト実行には一切不要なシステムコール群を、カーネル
+        # レベルで直接ERRNO拒否する。
+        #
+        # [正直な設計開示] defaultActionはSCMP_ACT_ALLOW(denylist方式)
+        # である。§CFと同じ制約(この調査環境のネットワーク許可一覧が
+        # コンテナレジストリへの到達を遮断しており、`python:3.11-alpine`
+        # イメージを実際に取得・straceして真に必要な許可リストを網羅的に
+        # 洗い出せない)により、真のdefault-deny(allowlist)方式は、
+        # 正しく構成できたことを実機確認できる環境でのみ着手すべき、
+        # 正直な未着手の課題として残した。
+        #
+        # 本天使は3段階で検証する: (A) プロファイルJSON自体の静的健全性、
+        # (B) `run_in_sandalphon()`が実際にこのプロファイルを参照して
+        # いるかの静的確認、(C) Dockerを一切使わず、libseccomp(C ABI)
+        # への直接ctypes呼び出しで、同じdenylistをこの実機のカーネルへ
+        # 直接ロードし、denylist上の各システムコールが本当にEPERMで
+        # 拒否され、良性の操作(getpid・ファイルの読み書き)は引き続き
+        # 成功することを、対照実験付きで実機確認する。(C)はDockerデーモン
+        # ・コンテナレジストリのいずれにも依存しないため、§CFと異なり
+        # この調査環境でも常にPASS/FAILを判定できる(確認済み)。(D)として
+        # 実際のDockerコンテナ内での動作も試みるが、この環境ではこれまで
+        # 通りイメージ取得に失敗するため、ここのみ§CFと同様に
+        # INCONCLUSIVEとなる。
+        #
+        # [実装中に自分で発見・即時訂正した誤り(正直な自己開示)] 本天使
+        # 自身の回帰テスト(denylistがforkを塞いでいない架空のプロファイル
+        # を与えてFAIL検知を確認する試験)が、生カーネル検証ハーネス内の
+        # 本物のバグを検出した――fork()が実際に成功する経路で、子プロセス
+        # が親と同じコードを実行し続け、`subprocess.run(capture_output=
+        # True)`が開いたパイプの書き込み端を複製したまま保持するため、
+        # 親(呼び出し元)がEOFを検知できずTimeoutExpiredに陥っていた。
+        # 子プロセスを直ちに`os._exit()`で終了させ、親が`os.waitpid()`
+        # で待つよう修正した(GRIMOIRE.md §CG参照)。
+        if: success()
+        run: python angels/dominions_syscall_guard.py
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
