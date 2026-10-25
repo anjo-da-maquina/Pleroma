@@ -54,13 +54,31 @@ _PROFILE_PATH = ROOT / "src" / "sandalphon" / "seccomp-profile.json"
 # 増えることは問題ないが、ここに列挙した核心項目が消えていれば、
 # §CGで塞いだ具体的な迂回経路のいずれかが再び開いてしまったことを
 # 意味する。
+# [§CI訂正] execve・execveatは意図的にこの一覧から除外している。
+# §CGでは当初これらも核心的な拒否対象に含めていたが、実際にGitHub
+# Actions上でDocker経由の動的検証(§CGまでこの調査環境では常時
+# INCONCLUSIVEだった(D)の段)が初めて実行された際、
+# `exec /usr/local/bin/python: operation not permitted`でコンテナの
+# 起動自体が失敗するという、自分自身が引き起こした回帰を発見した。
+# Docker/runcは本プロファイルのseccompフィルタをコンテナのPID1へ
+# ロードした上で、そのPID1自身にENTRYPOINT(`python`)をexecveさせて
+# 起動するため、execveを拒否対象に含めると隔離結界そのものが二度と
+# 起動できなくなる。fork/vfork/clone/clone3を拒否し続ける限り、
+# Linuxでは新規プロセスの生成自体(posix_spawnやos.exec系も内部で
+# これらのいずれかを経由する)がそもそも不可能であり、これが本来
+# 塞ぎたかった迂回経路であるため、execveの許可自体は実質的な後退
+# ではない。詳細はGRIMOIRE.md §CI参照。
 _REQUIRED_CORE_DENYLIST = {
-    "fork", "vfork", "clone", "clone3", "execve", "execveat",
+    "fork", "vfork", "clone", "clone3",
     "ptrace", "mount", "umount2", "chroot",
     "socket", "connect", "bind",
     "setuid", "setgid", "capset",
     "init_module", "reboot",
 }
+
+# [§CI] execve/execveatは逆に「denylistに含まれていてはならない」
+# ことを静的に検査する――§CGの誤りを再び踏まないための回帰防止。
+_FORBIDDEN_FROM_DENYLIST = {"execve", "execveat"}
 
 
 def _check_profile_json_is_well_formed() -> tuple:
@@ -90,6 +108,14 @@ def _check_profile_json_is_well_formed() -> tuple:
     missing = _REQUIRED_CORE_DENYLIST - denylist
     if missing:
         return False, f"§CGで塞いだはずの核心的なシステムコールが、プロファイルから脱落しています(回帰): {sorted(missing)}"
+
+    reintroduced = _FORBIDDEN_FROM_DENYLIST & denylist
+    if reintroduced:
+        return False, (
+            f"execve/execveatがdenylistに再び含まれています(§CIで自己訂正した回帰の再発): {sorted(reintroduced)}。"
+            f"これらを拒否すると、Docker/runcがコンテナのENTRYPOINTをexecveで起動する際に"
+            f"コンテナ自体が起動できなくなる(実機で確認済み、GRIMOIRE.md §CI参照)。"
+        )
 
     return True, "OK"
 
@@ -185,11 +211,17 @@ def main():
     except OSError as e:
         results["socket"] = "blocked" if e.errno == EPERM else f"wrong_errno:{e.errno}"
 
+    # [§CI注記] execve自体はこのdenylistにもはや含まれていない(§CIで
+    # 自己訂正した通り、コンテナのENTRYPOINT起動を壊すため)。しかし
+    # subprocess.run()は内部でfork系の呼び出しを経由してから execve
+    # するため、fork/vfork/clone/clone3が拒否され続けている限り、
+    # この呼び出しは「execveが拒否されたから」ではなく「新規プロセス
+    # そのものを生成できないから」正しくEPERMで失敗するはずである。
     try:
         subprocess.run(["/bin/true"])
-        results["execve_via_subprocess"] = "ALLOWED"
+        results["new_process_via_subprocess"] = "ALLOWED"
     except OSError as e:
-        results["execve_via_subprocess"] = "blocked" if e.errno == EPERM else f"wrong_errno:{e.errno}"
+        results["new_process_via_subprocess"] = "blocked" if e.errno == EPERM else f"wrong_errno:{e.errno}"
 
     libc = ctypes.CDLL("libc.so.6", use_errno=True)
     rc = libc.ptrace(0, 0, 0, 0)
@@ -214,6 +246,116 @@ def main():
 if __name__ == "__main__":
     main()
 """
+
+# [新設 2026-10 §CI] GRIMOIRE.md §CIで記録した自己発見の回帰
+# (execveをdenylistに含めると、Docker/runcがコンテナのPID1へこの
+# フィルタをロードした直後にENTRYPOINTをexecveする際、コンテナが
+# 一度も起動できなくなっていた)を、二度と再発させないための直接
+# 検証。重要なのは「execveが拒否されていないこと」そのものではなく
+# ――「このフィルタが既にロードされた状態の、まさにこのプロセス
+# 自身が、その場でexecveしてプロセス画像を入れ替えられること」で
+# ある。これはDockerのPID1が置かれる状況と全く同じ形であり、
+# fork()で子プロセスを作ってから子にexecveさせる形では、
+# fork自体が拒否対象であるため本件の再検証にならない(フィルタの
+# ロード後に、新しい子プロセスを作らずに、自分自身をそのまま
+# execveで置き換える必要がある)。
+_RAW_EXECVE_SELF_CHECK_SCRIPT = r"""
+import ctypes, os, sys
+
+SCMP_ACT_ALLOW = 0x7fff0000
+EPERM = 1
+
+def _scmp_act_errno(errno):
+    return 0x00050000 | (errno & 0x0000ffff)
+
+def build_and_load_filter(names, errno=EPERM):
+    lib = ctypes.CDLL("libseccomp.so.2", use_errno=True)
+    lib.seccomp_init.restype = ctypes.c_void_p
+    lib.seccomp_init.argtypes = [ctypes.c_uint32]
+    lib.seccomp_syscall_resolve_name.restype = ctypes.c_int
+    lib.seccomp_syscall_resolve_name.argtypes = [ctypes.c_char_p]
+    lib.seccomp_rule_add.restype = ctypes.c_int
+    lib.seccomp_rule_add.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int, ctypes.c_uint]
+    lib.seccomp_load.restype = ctypes.c_int
+    lib.seccomp_load.argtypes = [ctypes.c_void_p]
+
+    ctx = lib.seccomp_init(SCMP_ACT_ALLOW)
+    if not ctx:
+        raise RuntimeError("seccomp_init failed")
+    for name in names:
+        nr = lib.seccomp_syscall_resolve_name(name.encode())
+        if nr < 0:
+            continue
+        rc = lib.seccomp_rule_add(ctx, _scmp_act_errno(errno), nr, 0)
+        if rc != 0:
+            raise RuntimeError(f"seccomp_rule_add failed for {name}: rc={rc}")
+    rc = lib.seccomp_load(ctx)
+    if rc != 0:
+        raise RuntimeError(f"seccomp_load failed: rc={rc}")
+
+if __name__ == "__main__":
+    import json
+    profile_path = sys.argv[1]
+    with open(profile_path, encoding="utf-8") as f:
+        profile = json.load(f)
+    denylist = [n for rule in profile["syscalls"] for n in rule["names"]]
+    build_and_load_filter(denylist)
+    # フィルタをロードした直後、新しい子プロセスを一切作らずに、
+    # まさにこの自分自身のプロセス画像を /bin/true へ置き換える。
+    # これがDocker/runcがコンテナのPID1に対して行う操作と全く同じ形
+    # である。execveが拒否されていれば、ここでOSErrorが飛ぶ。
+    os.execve("/bin/true", ["/bin/true"], os.environ)
+"""
+
+
+def _check_execve_after_filter_load_still_works() -> tuple:
+    """GRIMOIRE.md §CIの回帰(execveをdenylistに含めるとコンテナ自体が
+    起動できなくなる)が再発していないかを、Dockerを使わず直接確認する。
+    `_check_raw_kernel_enforcement()`とは独立した検証である――そちらは
+    「危険なシステムコールが遮断されているか」を見るが、本検査は逆に
+    「フィルタロード後も、まさにこのプロセス自身によるexecveでの
+    自己置換(=コンテナのPID1がENTRYPOINTを起動する状況そのもの)が
+    壊れていないか」を見る。
+
+    戻り値: ("PASS"|"FAIL"|"INCONCLUSIVE", detail)
+    """
+    try:
+        ctypes.CDLL("libseccomp.so.2")
+    except OSError as e:
+        return "INCONCLUSIVE", f"libseccomp.so.2がこの環境に見つからないため、本検証を実施できません: {e}"
+
+    if not os.path.exists("/bin/true"):
+        return "INCONCLUSIVE", "/bin/trueがこの環境に見つからないため、本検証を実施できません。"
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as tf:
+        tf.write(_RAW_EXECVE_SELF_CHECK_SCRIPT)
+        script_path = tf.name
+
+    try:
+        proc = subprocess.run(
+            [sys.executable, script_path, str(_PROFILE_PATH)],
+            capture_output=True, text=True, timeout=15,
+        )
+    finally:
+        # [正直な注記] `_check_raw_kernel_enforcement()`と同じ理由により、
+        # 一時スクリプトの削除はあくまで後始末であり、本検査の正しさ
+        # (execveによる自己置換が機能しているか)そのものには関わらない。
+        # 開発環境自身の一時領域が外部要因で不安定な場合(既に消えている
+        # 場合)にまでFileNotFoundErrorで本検査全体を失敗させるのは
+        # 過剰であるため、ここも同様に寛容に扱う。
+        try:
+            os.unlink(script_path)
+        except FileNotFoundError:
+            pass
+
+    if proc.returncode != 0:
+        return "FAIL", (
+            f"seccompフィルタのロード後、このプロセス自身がexecveで"
+            f"自己置換(=コンテナのPID1がENTRYPOINTを起動する状況)を"
+            f"行おうとして失敗しました(§CIの回帰の再発): "
+            f"returncode={proc.returncode} stdout={proc.stdout!r} stderr={proc.stderr!r}"
+        )
+    return "PASS", "seccompフィルタのロード後も、execveによる自己置換(コンテナ起動相当の操作)が正常に成功することを確認しました。"
 
 
 def _check_raw_kernel_enforcement() -> tuple:
@@ -259,7 +401,7 @@ def _check_raw_kernel_enforcement() -> tuple:
     except (ValueError, IndexError) as e:
         return "FAIL", f"生カーネル検証スクリプトの出力を解析できませんでした: {e}: stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
-    denied_checks = ["fork", "socket", "execve_via_subprocess", "ptrace", "mount"]
+    denied_checks = ["fork", "socket", "new_process_via_subprocess", "ptrace", "mount"]
     not_blocked = [k for k in denied_checks if results.get(k) != "blocked"]
     if not_blocked:
         return "FAIL", f"以下のシステムコールが、プロファイルをロードしたにもかかわらず実際には遮断されませんでした: {[(k, results.get(k)) for k in not_blocked]}"
@@ -269,7 +411,7 @@ def _check_raw_kernel_enforcement() -> tuple:
     if broken_benign:
         return "FAIL", f"denylistに含まれないはずの良性の操作が、誤って遮断・破壊されています(誤検知): {[(k, results.get(k)) for k in broken_benign]}"
 
-    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/execve/ptrace/mountが全てEPERMで拒否され、getpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
+    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/ptrace/mountが全てEPERMで拒否され(新規プロセス生成は一切不可能)、execveを要しないgetpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
 
 
 def _check_docker_dynamic_if_possible() -> tuple:
@@ -323,6 +465,15 @@ def main():
         return
     raw_kernel_detail = detail
 
+    status, detail = _check_execve_after_filter_load_still_works()
+    if status == "FAIL":
+        report_fail(NAME, f"seccompフィルタのロード後、execveによる自己置換(コンテナ起動相当)が壊れています(§CIの回帰の再発): {detail}")
+        return
+    if status == "INCONCLUSIVE":
+        report_inconclusive(NAME, f"ここまではPASSしましたが、execve自己置換の検証を実施できませんでした: {detail}")
+        return
+    execve_self_check_detail = detail
+
     docker_status, docker_detail = _check_docker_dynamic_if_possible()
     if docker_status == "FAIL":
         report_fail(NAME, f"実際のSandalphonコンテナ内でseccompプロファイルが機能していません: {docker_detail}")
@@ -331,17 +482,18 @@ def main():
     if docker_status == "INCONCLUSIVE":
         report_inconclusive(
             NAME,
-            f"静的検証・生カーネル検証(libseccomp直接ロード)はPASSしましたが、実際のDockerコンテナ内での"
-            f"動的検証はこの環境では実施できませんでした。生カーネル検証の結果: {raw_kernel_detail} / "
-            f"コンテナ検証: {docker_detail}",
+            f"静的検証・生カーネル検証(libseccomp直接ロード)・execve自己置換検証はPASSしましたが、実際の"
+            f"Dockerコンテナ内での動的検証はこの環境では実施できませんでした。生カーネル検証の結果: "
+            f"{raw_kernel_detail} / execve自己置換検証: {execve_self_check_detail} / コンテナ検証: {docker_detail}",
         )
         return
 
     report_pass(
         NAME,
-        f"seccompプロファイルのdenylist・Sandalphonからの参照・生カーネルへの直接ロード・実際のコンテナ内"
-        f"実行の全てで、fork/socket/execve/ptrace/mount等の危険なシステムコールが遮断され、"
-        f"良性の操作は引き続き正常に動作することを確認しました。",
+        f"seccompプロファイルのdenylist・Sandalphonからの参照・生カーネルへの直接ロード・execveによる"
+        f"コンテナ起動相当の自己置換・実際のコンテナ内実行の全てで、fork/socket/ptrace/mount等の危険な"
+        f"システムコールが遮断されつつ、コンテナの起動そのものに必要なexecveと良性の操作は引き続き"
+        f"正常に動作することを確認しました。",
     )
 
 
