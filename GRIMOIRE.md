@@ -1674,3 +1674,30 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **実装中の自己レッドチーム**: `git stash`で`maquina_gatekeeper.py`の修正のみを一時的に取り消し(`socket.sendmsg`を含まない§CA時点のforbidden集合に戻し)、`angels/jegudiel_exfiltration_guard.py`を実行したところ、新設した`UDP sendmsg遮断(§CM)`の検査が正しく「封鎖中にsocket.sendmsg()によるデータ送信が遮断されなかった」としてFAILすることを確認した。`git stash pop`で修正を復元したところ、同じ検査がPASSに戻ることを確認した。`tests/test_jegudiel_exfiltration_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_sendmsg_regression`)を追加した。
 
 **検証**: `sys.addaudithook`で実際にイベント名を捕捉し、`socket.sendmsg()`が`"socket.sendmsg"`という専用eventを発火すること、その引数の形状(`(socket_obj, address_tuple)`)を実機で確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、修正後は4件の検査(sendto遮断・sendto非封鎖時・sendmsg遮断・sendmsg非封鎖時)すべてがPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`の全9件(新設4件を含む)がPASSすることを確認した。リポジトリ全体のpytestを再実行し、432 passed(新設分を含む)・既知の無関係な2件のみが残ることを確認した。
+
+
+### §CN: `os.sendfile()`はCPythonのaudit eventを一切発火しないため、`sefer`のファイル書き込み制限用ラッパーが「ソケット宛の送出」を意図的にスキップしていた盲点から、ネットワーク情報持ち出しが可能だった
+
+**発見**: §CM完了後、継続的な見直しの一環として、`maquina_gatekeeper.py`の`forbidden`集合が他のプロセス起動・通信系APIを網羅しているかを再点検した(`os.popen`→内部で`subprocess.Popen`/`os.posix_spawn`を呼ぶため既に遮断、`os.spawnv`→内部で`os.fork`相当、`pty.fork`→`os.forkpty`で既に遮断、などを実機で確認し、いずれも既存のforbidden集合で安全に covered されていることを確認)。その過程で`os.sendfile()`を試したところ、`sys.addaudithook`で全イベントを捕捉するフックを登録した状態で呼び出しても、捕捉されたイベントのリストが**完全に空**であることを実機で確認した――これは§CL・§CMのように「イベント名が足りない」という話ではなく、そもそもこのAPIに対してCPythonの`PySys_Audit()`自体が一度も呼ばれていない、という一段深い構造の欠陥である。
+
+さらに調べたところ、`sefer/__init__.py`には既に`_guarded_os_sendfile`というラッパーが存在していた(§CDで新設、ただし目的は別――`allowed_dirs`に基づくファイル書き込み制限)。その内部で使われている`_resolve_fd_path(fd)`は、`fd`が`/proc/self/fd/{fd}`のreadlinkで`"socket:"`から始まるリンクに解決される場合、意図的に`None`を返し、呼び出し元の`_check_fd_write_allowed`はパスが`None`の場合は「チェック対象のパスが存在しない」としてチェックそのものをスキップしていた。これはファイル書き込み制限の観点では正しい判断(ソケットにはallowed_dirsと比較すべきパスが存在しない)だが、副作用として「ソケット宛にファイル内容をそのまま送出する」というネットワーク情報持ち出しの経路が、完全に無検査のまま残っていた。
+
+実機で、実際のTCPループバック接続(サーバー側でbind・listen・accept、クライアント側でconnect)を用意し、実在するファイルに実際の機密文字列`"secret-file-content-to-exfiltrate"`を書き込み、`os.sendfile(cli.fileno(), fd, 0, 100)`を呼んだところ、受信側の`conn.recv()`で実際にその文字列がそのまま届くことを確認した――理論上の隙間ではなく、実際にデータが外部へ漏出する、本物の攻撃手段である。
+
+**たとえ話**: これまでの§CA・§CMは「正面玄関(connect)の横に、同じ塀を通れる別の裏口(sendto/sendmsg)があった」という話だった。本件はもう一段深い――裏口や勝手口を見張る門番(audit hook)そのものが、この経路(sendfile)では一度も呼び出しのベルを鳴らされない、つまり門番の目の前を素通りしているのに門番自身が存在を知らされない構造になっている。さらに、たまたまこの経路専用に置かれていた別の見張り(`sefer`の`_guarded_os_sendfile`)も、「これは建物(ファイル)ではなく電話線(ソケット)だから、自分の持ち物チェックリスト(allowed_dirs)の対象外」と判断して、素通りさせてしまっていた。電話線を通る内容そのものの検査は、誰の仕事にもなっていなかった。
+
+**原因**: (1) CPython側の構造的な事実として、`os.sendfile`/`os.copy_file_range`はカーネルのsendfile(2)/copy_file_range(2)相当を直接呼ぶ低レベルAPIであり、audit event機構を経由しない。(2) `sefer`側の`_resolve_fd_path`は、ファイル書き込み制限という**単一の目的**のために「パスが無ければ対象外」という設計を正しく行ったが、その同じ関数が(ラッパー経由で)ネットワーク送出の検査にも転用可能であるという事実が意識されていなかったため、ソケット宛の送出だけが構造的に無検査になっていた。これも、本セッションで繰り返し発見している「個別の具体例への対応に留まり、その具体例が属するカテゴリ全体を見ていない」という欠陥パターンの一種だが、§CL・§CMよりも深い層(audit event機構そのものの不在)で発生している。
+
+**対応**: `sefer/__init__.py`に新たに`_check_fd_not_socket_for_sendfile(fd, api_name)`を追加し、`_guarded_os_sendfile`・`_guarded_os_copy_file_range`の両方の先頭で(既存の`_check_fd_write_allowed`呼び出しに加えて)呼び出すようにした。この関数は、ガードが有効な状態で、送り先fdが`/proc/self/fd/{fd}`のreadlinkで`"socket:"`に解決される場合、ホストベースの選別的な許可(`allowed_hosts`との照合)は行わず、無条件に`LossOfAtaraxia`を発生させて拒否する。`angels/sachiel_kernel_transfer_guard.py`(§CDで新設、本件と同じファイルを対象とする天使)に、Sanctum起動**前**に接続済みの実ソケットへ、起動**後**に`os.sendfile`でファイル内容を送出する完全な実攻撃チェーンが遮断されることを確認する検査(`_check_sendfile_to_socket_is_blocked_end_to_end`)、およびSanctum未使用時の誤検知防止検査を追加した。
+
+**正直な設計方針の開示**: ホストベースの選別的な許可(`_michael_absolute_defense`がconnect/sendto/sendmsgで行っているような、`allowed_hosts`との照合による選別)ではなく、無条件拒否という、より保守的な方針を選んだ。理由は、本リポジトリの脅威モデル(使い捨てスクリプトの実行)において、ファイル内容をソケットへ直接sendfileする正当な用途が想定されないこと、および、選別的な許可を行うには接続済みソケットの`getpeername()`を安全に取得する(誤って元のfdを閉じない等)実装がさらに複雑になり、新たな欠陥を生むリスクがあることである。これはBOUNDARY.mdが既に明記している「Python層の防御はPythonのAPI呼び出しを監視するものであり、監視対象のAPIがそもそも監査イベントを発火しない場合は構造的に防御が及ばない」という限界そのものの、具体的な一例である――本件の修正はこの限界を解消したわけではなく、「たまたま修正可能だった(モンキーパッチで直接ラップできた)経路」を塞いだに過ぎない。CPythonが将来追加する、audit eventを持たない別のI/O系APIについては、同じ構造の欠陥が再発する可能性があることを、正直に記録する。
+
+また、本件の調査過程で、Sanctum起動**前**に確保したPythonファイルオブジェクトの`.write()`メソッド(`io.FileIO`/`io.BufferedWriter`)がaudit eventを発火しない件(§CDで既に発見・記録済みの既知の限界)とは別に、`os.sendfile`のソケット版という**新しい**具体的インシデントとして、本件を独立したGRIMOIRE項目として記録する。
+
+**一般化**: §CL・§CMで実践した「1つの具体的な迂回経路を見つけたら、同じ構造を持つ他のAPI・同じカテゴリの他の項目にも同じ穴がないかを体系的に確認する」という方法論を、Python層のプロセス起動・通信系APIの網羅的な再点検という形で継続した結果の発見である。加えて、「ある関数が特定の目的(ファイル書き込み制限)のために正しく`None`/スキップを返す設計をしていても、その同じ関数が別の目的(ネットワーク送出検査)にも転用されうる場所では、スキップの正しさを目的ごとに再確認する」という、新しい教訓を得た。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の修正のみを一時的に取り消し、`angels/sachiel_kernel_transfer_guard.py`を直接実行したところ、新設した`ソケット宛送出遮断(§CN・事前接続バイパス込み)`の検査が正しく「os.sendfileによるソケットへの送出が遮断されなかった」としてFAILすることを確認した。`git stash pop`で修正を復元したところ、同じ天使の全6件の検査(既存4件+新設2件)がPASSに戻ることを確認した。`tests/test_sachiel_kernel_transfer_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_reintroduced_sendfile_socket_regression`)を追加した。
+
+**検証**: 実際のTCPループバック接続・実在するファイル・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前の接続確立→起動後のos.sendfile攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。`angels/sachiel_kernel_transfer_guard.py`を直接実行し、6件の検査すべてがPASSすることを確認した。
+
+**正直な注記(本セッションの環境上の制約)**: 本件の修正は、上記の通りangelスクリプトの直接実行と実機でのSanctum/実ソケットを用いた完全な攻撃チェーンの再現によって検証したが、本セッションの実行環境では`pip`/`uv`による`pypi.org`への接続がDNS解決レベルで失敗し(直接接続・プロキシ経由のいずれも不可。実機で確認済み、`curl`でプロキシ経由は`403 Forbidden`)、`requirements.txt`に記載の`rsa`パッケージ等を新たにインストールできず、`tests/conftest.py`が`maquina_gatekeeper`(`import rsa`に依存)をインポートする際に失敗するため、**リポジトリ全体のpytestをこのセッション内では実行できなかった**。これは自己の都合の良い推測や過去の実行結果の転用で「432 passedだった」等と報告することを意図的に避けるための、正直な記録である。実際の検証は、pytestに依存しないangelスクリプトの直接実行(`python3 angels/sachiel_kernel_transfer_guard.py`)、および追加した`tests/test_sachiel_kernel_transfer_guard.py`の新設テストについては、GitHub Actions上の実CI(本セッションのsandboxとは異なり、完全なネットワークアクセスを持つ実機)でのpytest実行結果をもって、最終的な実機確認とする。

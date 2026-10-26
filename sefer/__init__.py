@@ -527,6 +527,48 @@ def _resolve_fd_path(fd: int):
         return None
     return link
 
+def _check_fd_not_socket_for_sendfile(fd: int, api_name: str):
+    """[脆弱性修正 2026-10 §CN] `os.sendfile(out_fd, in_fd, ...)`は、
+    `out_fd`がファイルではなく**ソケット**である場合、ファイル内容を
+    ネットワーク経由でそのまま外部へ送出できる(実機で実際に、サーバー
+    側で`recv()`した内容として到達することを確認済み――本物の情報
+    持ち出しである)。しかしこのAPI自体がsys.addaudithookの監査イベントを
+    一つも発火しないため(ファイル冒頭のコメント参照)、Gatekeeper
+    (`maquina_gatekeeper.py`、イベント名の列挙に依存する設計)は構造的に
+    一度もこの呼び出しを観測できず、forbidden集合への追加では一切
+    対策にならない。本ファイル自身の`_check_fd_write_allowed`も、
+    `_resolve_fd_path`が`"socket:"`で始まるリンクを(本来ファイル書き込み
+    制限が対象とする「パス」が存在しないという正当な理由で)意図的に
+    `None`として返し、その結果チェック自体をスキップしていたため、
+    ソケット宛の送出は従来どおり無検査だった。これはファイル書き込み
+    制限(allowed_dirs)の対象外という判断としては正しいが、副作用として
+    ネットワーク送出の検査が一切行われていないことを、本関数で別途
+    明示的に塞ぐ。許可された送信先ホストかどうかを`getpeername()`等で
+    判定して選別的に許可する設計も検討したが、この隔離結界の脅威モデル
+    (使い捨てスクリプトの実行)において、ファイル内容をソケットへ直接
+    送出する正当な用途は想定されないため、保守的に無条件拒否とする。"""
+    if getattr(_hook_state, 'in_hook', False):
+        return
+    if not _is_guard_active():
+        return
+    if fd in _WHITELISTED_FDS:
+        return
+    _hook_state.in_hook = True
+    try:
+        try:
+            link = os.readlink(f"/proc/self/fd/{fd}")
+        except Exception:
+            return
+        if link.startswith("socket:"):
+            _trigger_violation(
+                api_name, (fd, link),
+                f"{api_name}でソケットfd(fd={fd})への送出が試みられました"
+                f"(監査イベントの存在しないAPIによるネットワーク情報持ち出し、§CN)。"
+            )
+    finally:
+        _hook_state.in_hook = False
+
+
 def _check_fd_write_allowed(fd: int, api_name: str):
     if getattr(_hook_state, 'in_hook', False):
         return
@@ -607,10 +649,17 @@ _ORIG_OS_SENDFILE = getattr(os, "sendfile", None)
 _ORIG_OS_COPY_FILE_RANGE = getattr(os, "copy_file_range", None)
 
 def _guarded_os_sendfile(out_fd, in_fd, offset, count, *a, **kw):
+    # [§CN] ソケット宛の送出は、ファイル書き込み制限(allowed_dirs)の
+    # 対象外であると同時に、ネットワーク情報持ち出しの対象でもあるため、
+    # 別の専用チェックで明示的に拒否する(_check_fd_write_allowedは
+    # ソケットを"パス無し"として素通りさせるだけで、これのみでは
+    # 塞がれない)。
+    _check_fd_not_socket_for_sendfile(out_fd, "os.sendfile")
     _check_fd_write_allowed(out_fd, "os.sendfile")
     return _ORIG_OS_SENDFILE(out_fd, in_fd, offset, count, *a, **kw)
 
 def _guarded_os_copy_file_range(src, dst, count, offset_src=None, offset_dst=None):
+    _check_fd_not_socket_for_sendfile(dst, "os.copy_file_range")
     _check_fd_write_allowed(dst, "os.copy_file_range")
     return _ORIG_OS_COPY_FILE_RANGE(src, dst, count, offset_src, offset_dst)
 
