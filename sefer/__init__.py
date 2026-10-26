@@ -806,6 +806,40 @@ def _guarded_ssl_socket_sendall(self, *a, **kw):
     return _ORIG_SSL_SOCKET_SENDALL(self, *a, **kw)
 
 
+# [脆弱性修正 2026-10 §CR] §CPで`ssl.SSLSocket.send`/`sendall`を塞いだ
+# 直後、「このクラスには他にも同系統の送出メソッドがオーバーライド
+# されていないか」を`dir(ssl.SSLSocket)`で機械的に洗い直したところ、
+# `write()`というメソッドも独自実装で上書きされていることを発見した。
+# CPython本体のソースを確認すると、`SSLSocket.write()`は
+# `self._sslobj.write(data)`——TLSハンドシェイクを実装するC実装の
+# `_ssl._SSLSocket`オブジェクトへの直接呼び出し——であり、`send`/
+# `sendall`はおろか、基底クラスの`socket.socket`のどのメソッドも
+# 一切経由しない、全く別の第三の経路だった。実機で、自己署名証明書
+# による本物のTLSループバック接続を確立し、Sanctum起動**後**に
+# `SSLSocket.write()`で機密データを送出したところ、§CPの修正後でも
+# 例外無しに成功し、受信側に実際にデータが届くことを確認した。
+#
+# [一般化] §CPで「サブクラスによるメソッド上書き」という見落とし
+# カテゴリ自体は認識していたが、「そのクラスを塞いだら、同じクラスに
+# 他に塞ぐべきメソッドが残っていないか」という横の網羅確認が足りて
+# いなかった。1つの脆弱性を直した直後に`dir()`で同クラスの全メソッド
+# を機械的に棚卸しする、という手順を今後の標準動作として採用する。
+#
+# なお、同じ棚卸しで`sendto`・`sendmsg`も`SSLSocket`で上書きされている
+# ことを確認したが、いずれもTLSハンドシェイク確立後(`self._sslobj`が
+# 設定済みの状態)は`sendto`は`ValueError`、`sendmsg`は
+# `NotImplementedError`を無条件に発生させる実装になっており、実際の
+# データ送出経路としては機能しない(CPython自身が「平文の
+# データグラム送信はTLS上では許可しない」という設計で塞いでいる)。
+# これは実機で確認済みであり、追加の対策は不要と判断した。
+_ORIG_SSL_SOCKET_WRITE = ssl.SSLSocket.write
+
+
+def _guarded_ssl_socket_write(self, *a, **kw):
+    _check_socket_send_allowed(self, "ssl.SSLSocket.write")
+    return _ORIG_SSL_SOCKET_WRITE(self, *a, **kw)
+
+
 def _create_awaken():
     _awakened = False
     def awaken():
@@ -828,6 +862,7 @@ def _create_awaken():
         socket.socket.sendall = _guarded_socket_sendall
         ssl.SSLSocket.send = _guarded_ssl_socket_send
         ssl.SSLSocket.sendall = _guarded_ssl_socket_sendall
+        ssl.SSLSocket.write = _guarded_ssl_socket_write
         _awakened = True
     return awaken
 

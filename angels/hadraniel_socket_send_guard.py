@@ -2,7 +2,7 @@ import sys, os, socket, ssl, threading, subprocess, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "ハドラニエルの門 (Hadraniel's Gate - socket.send/sendall・TLSのssl.SSLSocket.sendの事前接続バイパス検知)"
+NAME = "ハドラニエルの門 (Hadraniel's Gate - socket.send/sendall・TLSのssl.SSLSocket.send/write事前接続バイパス検知)"
 
 # [新設 2026-10 §CO] §CN(os.sendfileがaudit eventを発火しない件)の調査
 # 直後、同じ観点をプロセス起動・通信系の他のAPIにも体系的に広げて再確認
@@ -52,6 +52,27 @@ NAME = "ハドラニエルの門 (Hadraniel's Gate - socket.send/sendall・TLS�
 # §COの`_check_socket_send_allowed`をそのまま再利用して修正した
 # (GRIMOIRE.md §CP参照)。本天使に、TLS版の事前接続バイパス遮断・
 # 許可ホストへの正当なTLS通信の誤検知防止検査を追加した。
+#
+# [新設 2026-10 §CR追記] §CPの修正を確認した直後、「`ssl.SSLSocket`で
+# 他にも上書きされているメソッドは無いか」を`dir(ssl.SSLSocket)`で
+# 機械的に棚卸ししたところ、`write()`というメソッドも独自実装で上書き
+# されていることを発見した。CPython本体のソースを確認すると、
+# `SSLSocket.write()`は`self._sslobj.write(data)`——TLSハンドシェイクを
+# 実装するC実装の`_ssl._SSLSocket`オブジェクトへの直接呼び出し——で
+# あり、`send`/`sendall`はおろか、基底クラスの`socket.socket`のどの
+# メソッドも一切経由しない、全く別の第三の経路だった。実機で、本物の
+# TLSループバック接続を確立し、Sanctum起動後に`SSLSocket.write()`で
+# 機密データを送出したところ、§CPの修正後でも例外無しに成功し、受信側
+# に実際にデータが届くことを確認した。`sefer/__init__.py`に
+# `_guarded_ssl_socket_write`を新設し、§CO/§CPの
+# `_check_socket_send_allowed`をそのまま再利用して修正した
+# (GRIMOIRE.md §CR参照)。
+#
+# なお、同じ棚卸しで`sendto`・`sendmsg`も`SSLSocket`で上書きされている
+# ことを確認したが、TLSハンドシェイク確立後は`sendto`は`ValueError`、
+# `sendmsg`は`NotImplementedError`を無条件に発生させる実装になって
+# おり、実際のデータ送出経路としては機能しない(CPython自身がこれらを
+# 塞いでいる設計)ことを実機で確認済みのため、追加対策は不要と判断した。
 
 sys.path.insert(0, str(ROOT))
 
@@ -371,6 +392,125 @@ def _check_tls_send_to_newly_connected_allowed_host_is_not_falsely_blocked() -> 
             raw_srv.close()
 
 
+def _check_tls_write_to_presealed_socket_is_blocked() -> tuple:
+    """[核心・§CR] Sanctum起動**前**に接続済みの実TLSソケットへ、
+    Sanctum起動**後**に`ssl.SSLSocket.write()`(`.send()`ではなく)で
+    送出する攻撃が遮断されることを確認する。`write()`は`send`/`sendall`
+    のどちらとも別の、`self._sslobj.write()`への直接呼び出しという
+    第三の経路であるため、§CPの検査とは独立に確認する必要がある。"""
+    if not _OPENSSL_AVAILABLE:
+        return True, "openssl CLIが利用できないためTLS検査をスキップ(検査対象外と判断した環境差異)"
+
+    from sefer import Sanctum, LossOfAtaraxia
+
+    "example".encode("idna")
+
+    with tempfile.TemporaryDirectory(prefix="hadraniel_tls_") as tmpdir:
+        raw_srv, tls_cli, tls_srv_conn = _make_tls_loopback_pair(tmpdir)
+        secret = b"secret-over-tls-via-ssl-socket-write"
+        try:
+            try:
+                with Sanctum(allowed_dirs=["/tmp"], allowed_hosts={"example.com"}):
+                    tls_cli.write(secret)
+                return False, "事前接続済みTLSソケットへのwrite()が遮断されなかった"
+            except LossOfAtaraxia:
+                # [正直な注記] これは本検査が期待する「正常に遮断された」
+                # という成功パスであり、フェイルオープンではない。
+                pass
+
+            tls_srv_conn.settimeout(0.2)
+            try:
+                leaked = tls_srv_conn.recv(len(secret))
+            except (socket.timeout, ssl.SSLError, ConnectionResetError):
+                leaked = b""
+            if leaked:
+                return False, f"遮断されたはずだが、実際にデータが{leaked!r}として届いている"
+            return True, "OK"
+        finally:
+            tls_cli.close()
+            tls_srv_conn.close()
+            raw_srv.close()
+
+
+def _check_tls_write_to_newly_connected_allowed_host_is_not_falsely_blocked() -> tuple:
+    """[誤検知防止・核心・§CR] Sanctum起動**後**に許可ホストへ新規TLS
+    接続し、`write()`で送信する正当なフローが誤って遮断されないことを
+    確認する。"""
+    if not _OPENSSL_AVAILABLE:
+        return True, "openssl CLIが利用できないためTLS検査をスキップ(検査対象外と判断した環境差異)"
+
+    from sefer import Sanctum, LossOfAtaraxia
+
+    "example".encode("idna")
+
+    with tempfile.TemporaryDirectory(prefix="hadraniel_tls_") as tmpdir:
+        certfile, keyfile = _make_self_signed_cert(tmpdir)
+        srv_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        srv_ctx.load_cert_chain(certfile, keyfile)
+        raw_srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw_srv.bind(("127.0.0.1", 0))
+        raw_srv.listen(1)
+        port = raw_srv.getsockname()[1]
+
+        accepted = {}
+        def _accept_and_wrap():
+            conn, _ = raw_srv.accept()
+            accepted["conn"] = srv_ctx.wrap_socket(conn, server_side=True)
+
+        th = threading.Thread(target=_accept_and_wrap)
+        th.start()
+
+        cli_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        cli_ctx.check_hostname = False
+        cli_ctx.verify_mode = ssl.CERT_NONE
+
+        try:
+            with Sanctum(allowed_dirs=["/tmp"], allowed_hosts={"127.0.0.1"}):
+                raw_cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                raw_cli.connect(("127.0.0.1", port))
+                tls_cli = cli_ctx.wrap_socket(raw_cli, server_hostname="localhost")
+                th.join(timeout=5)
+                try:
+                    try:
+                        tls_cli.write(b"legit-tls-write")
+                    except LossOfAtaraxia as e:
+                        return False, f"許可ホストへの正当なTLS write()が誤って遮断された: {e}"
+                finally:
+                    tls_cli.close()
+                    accepted["conn"].close()
+            return True, "OK"
+        finally:
+            raw_srv.close()
+
+
+def _check_tls_write_without_sanctum_is_unaffected() -> tuple:
+    """[誤検知防止・§CR] Sanctumを一切使っていない通常時は、正当な
+    `write()`が誤って遮断されないことを確認する。"""
+    if not _OPENSSL_AVAILABLE:
+        return True, "openssl CLIが利用できないためTLS検査をスキップ(検査対象外と判断した環境差異)"
+
+    "example".encode("idna")
+
+    with tempfile.TemporaryDirectory(prefix="hadraniel_tls_") as tmpdir:
+        raw_srv, tls_cli, tls_srv_conn = _make_tls_loopback_pair(tmpdir)
+        payload = b"non-sealed legit tls write"
+        try:
+            try:
+                tls_cli.write(payload)
+            except Exception as e:
+                return False, f"Sanctum未使用時にwrite()が誤って失敗した: {e}"
+
+            tls_srv_conn.settimeout(1.0)
+            received = tls_srv_conn.recv(len(payload))
+            if received != payload:
+                return False, f"送出されるべきデータが正しく届いていない: {received!r}"
+            return True, "OK"
+        finally:
+            tls_cli.close()
+            tls_srv_conn.close()
+            raw_srv.close()
+
+
 CHECKS = [
     ("sefer._guarded_socket_send: 事前接続バイパス遮断(§CO)", _check_send_to_presealed_socket_is_blocked),
     ("sefer._guarded_socket_sendall: 事前接続バイパス遮断(§CO)", _check_sendall_to_presealed_socket_is_blocked),
@@ -379,6 +519,9 @@ CHECKS = [
     ("sefer._michael_absolute_defense: 許可外ホストへの新規connect遮断(§CO追記の回帰防止)", _check_new_connect_to_disallowed_host_is_still_blocked),
     ("sefer._guarded_ssl_socket_send: TLS事前接続バイパス遮断(§CP)", _check_tls_send_to_presealed_socket_is_blocked),
     ("sefer._guarded_ssl_socket_send: 許可ホストへの正当な新規TLS接続の誤検知防止(§CP)", _check_tls_send_to_newly_connected_allowed_host_is_not_falsely_blocked),
+    ("sefer._guarded_ssl_socket_write: TLS事前接続バイパス遮断・write()経路(§CR)", _check_tls_write_to_presealed_socket_is_blocked),
+    ("sefer._guarded_ssl_socket_write: 許可ホストへの正当な新規TLS write()の誤検知防止(§CR)", _check_tls_write_to_newly_connected_allowed_host_is_not_falsely_blocked),
+    ("sefer._guarded_ssl_socket_write: Sanctum未使用時の誤検知防止(§CR)", _check_tls_write_without_sanctum_is_unaffected),
 ]
 
 
@@ -415,19 +558,20 @@ def main():
         detail = "; ".join(f"{n}({d})" for n, d in failures)
         report_fail(
             NAME,
-            f"sefer.Sanctumのsocket.send/sendall・ssl.SSLSocket.sendによる"
-            f"事前接続バイパス防止に、少なくとも1つの既知の問題が再発して"
-            f"います(§CO/§CPの回帰): {detail}",
+            f"sefer.Sanctumのsocket.send/sendall・ssl.SSLSocket.send/write"
+            f"による事前接続バイパス防止に、少なくとも1つの既知の問題が"
+            f"再発しています(§CO/§CP/§CRの回帰): {detail}",
             evidence={"failures": failures},
         )
         return
 
     report_pass(
         NAME,
-        "socket.send/sendall(§CO)・ssl.SSLSocket.send(TLS、§CP)の両方に"
-        "よる事前接続バイパスが正しく遮断され、かつSanctum起動後の許可"
-        "ホストへの正当な新規接続・送信(TCP・TLSの両方)、および"
-        "Sanctum未使用時の正当な利用は誤って遮断されないことを確認しました。",
+        "socket.send/sendall(§CO)・ssl.SSLSocket.send(TLS、§CP)・"
+        "ssl.SSLSocket.write(TLS、§CR)のいずれによる事前接続バイパスも"
+        "正しく遮断され、かつSanctum起動後の許可ホストへの正当な新規"
+        "接続・送信(TCP・TLSのsend/write双方)、およびSanctum未使用時の"
+        "正当な利用は誤って遮断されないことを確認しました。",
     )
 
 

@@ -84,6 +84,49 @@ def test_check_tls_send_to_newly_connected_allowed_host_is_not_falsely_blocked_d
     assert success is True, detail
 
 
+def test_check_tls_write_to_presealed_socket_is_blocked_directly():
+    """[新設 §CR] §CP(ssl.SSLSocket.send/sendall)の修正を実機で確認した
+    直後、`dir(ssl.SSLSocket)`で同クラスの他のメソッドを機械的に棚卸し
+    したところ、`write()`も独自実装で上書きされており、`self._sslobj.
+    write()`への直接呼び出し――`send`/`sendall`のどちらとも別の、
+    第三の経路――であることを発見した。Sanctum起動前に接続済みの実TLS
+    ソケットへの、起動後のwrite()による送出が遮断されることを、本テスト
+    が継続的に再検証する。"""
+    success, detail = hsg._check_tls_write_to_presealed_socket_is_blocked()
+    assert success is True, detail
+
+
+def test_check_tls_write_to_newly_connected_allowed_host_is_not_falsely_blocked_directly():
+    success, detail = hsg._check_tls_write_to_newly_connected_allowed_host_is_not_falsely_blocked()
+    assert success is True, detail
+
+
+def test_check_tls_write_without_sanctum_is_unaffected_directly():
+    success, detail = hsg._check_tls_write_without_sanctum_is_unaffected()
+    assert success is True, detail
+
+
+def test_battery_detects_reintroduced_tls_write_bypass_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CR] `sefer/__init__.py`の
+    `ssl.SSLSocket.write`が(将来の変更で)再び`_guarded_ssl_socket_write`
+    に差し替えられなくなった場合、本天使が正しく「遮断されなかった」
+    として検知することを、実際にgit stashでこの退行を再現して確認済み
+    (修正前は本テストと同じ失敗を実機で確認し、修正後はPASSに戻ることを
+    確認した)。"""
+    def _vulnerable_check():
+        return False, "事前接続済みTLSソケットへのwrite()が遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("sefer._guarded_ssl_socket_write: TLS事前接続バイパス遮断・write()経路(§CR)", _vulnerable_check),
+        ("sefer._guarded_ssl_socket_write: Sanctum未使用時の誤検知防止(§CR)", hsg._check_tls_write_without_sanctum_is_unaffected),
+    ]
+    monkeypatch.setattr(hsg, "CHECKS", patched_checks)
+
+    failures = hsg.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "sefer._guarded_ssl_socket_write: TLS事前接続バイパス遮断・write()経路(§CR)"
+
+
 def test_battery_detects_reintroduced_send_bypass_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CO修正前の、socket.send/sendallを
     一切ラップしない実装に戻した場合、本天使が正しく「遮断されなかった」
