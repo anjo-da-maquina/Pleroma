@@ -250,6 +250,25 @@ def main():
     err = ctypes.get_errno()
     results["io_uring_setup"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
 
+    # [新設 §CL・2回目] Dockerの既定seccompプロファイル本文を調べて、
+    # 本プロファイルから脱落していた3件(open_by_handle_at・quotactl・
+    # get_mempolicy)を追加で見つけた。いずれも実際にEPERMで拒否される
+    # ことを生カーネル検証する。quotactl・open_by_handle_atはglibcの
+    # 名前付きラッパーが存在するため直接呼び出し、get_mempolicyは
+    # ラッパーが存在しないためraw syscall番号(x86_64で239)経由で
+    # 呼び出す。
+    rc = libc.quotactl(0, None, 0, None)
+    err = ctypes.get_errno()
+    results["quotactl"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
+
+    rc = libc.open_by_handle_at(-1, None, 0)
+    err = ctypes.get_errno()
+    results["open_by_handle_at"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
+
+    rc = libc.syscall(239, ctypes.c_void_p(0), ctypes.c_void_p(0), ctypes.c_ulong(0), ctypes.c_ulong(0), ctypes.c_uint(0))
+    err = ctypes.get_errno()
+    results["get_mempolicy"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
+
     results["getpid"] = "OK" if os.getpid() > 0 else "UNEXPECTED"
     tmpf = f"/tmp/dominions_raw_check_benign_{os.getpid()}.txt"
     with open(tmpf, "w") as f:
@@ -419,7 +438,10 @@ def _check_raw_kernel_enforcement() -> tuple:
     except (ValueError, IndexError) as e:
         return "FAIL", f"生カーネル検証スクリプトの出力を解析できませんでした: {e}: stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
-    denied_checks = ["fork", "socket", "new_process_via_subprocess", "ptrace", "mount", "io_uring_setup"]
+    denied_checks = [
+        "fork", "socket", "new_process_via_subprocess", "ptrace", "mount", "io_uring_setup",
+        "quotactl", "open_by_handle_at", "get_mempolicy",
+    ]
     not_blocked = [k for k in denied_checks if results.get(k) != "blocked"]
     if not_blocked:
         return "FAIL", f"以下のシステムコールが、プロファイルをロードしたにもかかわらず実際には遮断されませんでした: {[(k, results.get(k)) for k in not_blocked]}"
@@ -429,7 +451,7 @@ def _check_raw_kernel_enforcement() -> tuple:
     if broken_benign:
         return "FAIL", f"denylistに含まれないはずの良性の操作が、誤って遮断・破壊されています(誤検知): {[(k, results.get(k)) for k in broken_benign]}"
 
-    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/ptrace/mount/io_uring_setupが全てEPERMで拒否され(新規プロセス生成・seccompを迂回しうるI/O提出経路のいずれも不可能)、execveを要しないgetpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
+    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/ptrace/mount/io_uring_setup/quotactl/open_by_handle_at/get_mempolicyが全てEPERMで拒否され(新規プロセス生成・seccompを迂回しうるI/O提出経路・Dockerの既定プロファイルも拒否する既知の危険操作のいずれも不可能)、execveを要しないgetpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
 
 
 def _check_docker_dynamic_if_possible() -> tuple:

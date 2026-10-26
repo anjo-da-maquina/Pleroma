@@ -172,6 +172,27 @@ def test_raw_kernel_enforcement_detects_io_uring_setup_not_blocked(tmp_path, mon
     assert "io_uring_setup" in detail
 
 
+def test_raw_kernel_enforcement_detects_docker_default_profile_gaps_not_blocked(tmp_path, monkeypatch):
+    """[核心・§CLの固定・2回目] Dockerの既定seccompプロファイルを調査して
+    追加で見つけた3件(open_by_handle_at・quotactl・get_mempolicy)が
+    denylistから脱落している場合、他の本物の危険なシステムコールが
+    正しく遮断されている状態でも、本検査が正しく検知することを確認
+    する。"""
+    missing = tmp_path / "missing_docker_default_gaps.json"
+    weakened = sorted(
+        dsg._REQUIRED_CORE_DENYLIST
+        | {"io_uring_setup", "io_uring_enter", "io_uring_register"}
+    )
+    missing.write_text(json.dumps({
+        "defaultAction": "SCMP_ACT_ALLOW",
+        "syscalls": [{"names": weakened, "action": "SCMP_ACT_ERRNO"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(dsg, "_PROFILE_PATH", missing)
+    status, detail = dsg._check_raw_kernel_enforcement()
+    assert status == "FAIL", detail
+    assert "quotactl" in detail or "open_by_handle_at" in detail or "get_mempolicy" in detail
+
+
 def test_raw_kernel_enforcement_is_inconclusive_when_libseccomp_missing(monkeypatch):
     import ctypes
 

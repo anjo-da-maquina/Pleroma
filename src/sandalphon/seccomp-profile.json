@@ -22,23 +22,24 @@
       "errnoRet": 1
     },
     {
-      "comment": "Mount/filesystem-namespace manipulation. The jail's root filesystem is already --read-only; none of these operations are needed to run a script and all of them are classic container-escape primitives.",
+      "comment": "Mount/filesystem-namespace manipulation. The jail's root filesystem is already --read-only; none of these operations are needed to run a script and all of them are classic container-escape primitives. [§CL addition] open_by_handle_at is also denied here, matching Docker's own default profile: it opens a file by an opaque kernel-level handle rather than by path, bypassing the normal path-resolution checks a script's access would otherwise go through, and has a documented history of container-escape use. It additionally requires CAP_DAC_READ_SEARCH -- which --cap-drop=ALL already removes -- but as with the rest of this group, blocking it at the seccomp layer too does not depend on the capability check staying correctly configured forever.",
       "names": [
         "mount", "umount2", "pivot_root", "chroot",
-        "fsconfig", "fsmount", "fsopen", "fspick", "move_mount", "open_tree"
+        "fsconfig", "fsmount", "fsopen", "fspick", "move_mount", "open_tree",
+        "open_by_handle_at"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1
     },
     {
-      "comment": "Kernel module / system-wide control. A disposable per-script container has no legitimate need to load kernel modules, reboot the host, or otherwise affect anything outside itself.",
+      "comment": "Kernel module / system-wide control. A disposable per-script container has no legitimate need to load kernel modules, reboot the host, or otherwise affect anything outside itself. [§CL addition] quotactl is also denied here, matching Docker's own default profile: it could let a container disable or inspect filesystem quota/resource accounting outside itself, and (like several other entries in this group) is additionally gated by CAP_SYS_ADMIN -- which --cap-drop=ALL already removes -- but the same defense-in-depth rationale as the rest of this group applies.",
       "names": [
         "init_module", "finit_module", "delete_module", "create_module",
         "get_kernel_syms", "query_module", "kexec_load", "kexec_file_load",
         "reboot", "syslog", "sysfs", "_sysctl", "uselib", "acct",
         "swapon", "swapoff", "nfsservctl", "lookup_dcookie",
         "perf_event_open", "bpf", "userfaultfd", "vhangup",
-        "modify_ldt", "iopl", "ioperm"
+        "modify_ldt", "iopl", "ioperm", "quotactl"
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1
@@ -72,9 +73,9 @@
       "errnoRet": 1
     },
     {
-      "comment": "NUMA memory-policy manipulation and the kernel keyring. Historically exploit-prone, never needed by an ordinary disposable script.",
+      "comment": "NUMA memory-policy manipulation and the kernel keyring. Historically exploit-prone, never needed by an ordinary disposable script. [§CL addition] get_mempolicy (the read-only counterpart of set_mempolicy) is also denied here, matching Docker's own default profile -- it has no legitimate use for a disposable script either, and keeping the read and write sides of this surface consistent avoids an asymmetric gap.",
       "names": [
-        "mbind", "migrate_pages", "move_pages", "set_mempolicy",
+        "mbind", "migrate_pages", "move_pages", "set_mempolicy", "get_mempolicy",
         "add_key", "request_key", "keyctl"
       ],
       "action": "SCMP_ACT_ERRNO",

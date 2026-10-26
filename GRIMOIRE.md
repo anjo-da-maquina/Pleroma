@@ -1640,3 +1640,18 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **実装中の自己レッドチーム**: `_REQUIRED_CORE_DENYLIST`から`io_uring_setup`のみを除いた架空のプロファイルを与え、(1)静的検証(`_check_profile_json_is_well_formed`)が正しくFAILし、かつ検知内容に`io_uring_setup`という名前が含まれること、(2)生カーネル検証(`_check_raw_kernel_enforcement`)が、fork/socket/ptrace/mountは正しく遮断されている状態でも、`io_uring_setup`だけが遮断されていないことを正しく検知してFAILすることを、実際にlibseccompを実機のカーネルへロードして確認する2件の回帰テストを追加した。
 
 **検証**: `libseccomp.so.2`の`seccomp_syscall_resolve_name`で、`io_uring_setup`(425)・`io_uring_enter`(426)・`io_uring_register`(427)の3名が実際にこの実機のx86_64カーネルで解決可能であることを確認した。`angels/dominions_syscall_guard.py`を直接実行し、新設した生カーネル検証(io_uring_setupを実際にraw syscall経由で呼び出し、EPERMで拒否されることを確認)がPASSすることを確認した。`tests/test_dominions_syscall_guard.py`に追加した2件の回帰テストを含む同ファイルの全19件がPASSすることを確認した。リポジトリ全体のpytestを再実行し、428 passed(新設した2件を含む)・既知の無関係な2件のみが残ることを確認した。
+
+
+### §CL追記: Dockerの既定seccompプロファイルとの体系的な比較で、io_uring以外にも3件の脱落(open_by_handle_at・quotactl・get_mempolicy)を発見
+
+**発見**: §CLでio_uringを塞いだ後、「他にも同種の脱落がないか」をDockerの公式ドキュメント(docs.docker.com/engine/security/seccomp)に掲載されている既定プロファイルの拒否システムコール一覧と、本プロファイルを体系的に比較した。その結果、`open_by_handle_at`(カーネルレベルの不透明なハンドルでファイルをパス解決を経ずに開く、既知のコンテナ脱出手口)・`quotactl`(ディスククォータの操作)・`get_mempolicy`(§CGで既に拒否していた`set_mempolicy`等の読み取り側の対)の3件が、本プロファイルから脱落していることを確認した。
+
+**原因**: §CG〜§CIで本プロファイルを作り込んだ際は、§CD・§CEで実際に発見した具体的な迂回経路を起点に組み立てたため、「Dockerの既定プロファイル自体が拒否している全syscallの一覧」との網羅的な照合を行っていなかった。§CLでio_uringという1件を見つけた際に、同じ照合をもう一歩進めて体系的に行うべきだった。
+
+**対応**: 3件それぞれを、既存の該当するグループ(`open_by_handle_at`→mount/filesystem-namespaceグループ、`quotactl`→kernel module/system-wide controlグループ、`get_mempolicy`→NUMA memory-policyグループ)へ追加した。`angels/dominions_syscall_guard.py`の生カーネル検証に、3件それぞれを実際にraw syscall/glibcラッパー経由で呼び出しEPERMで拒否されることを確認する検査を追加した(`quotactl`・`open_by_handle_at`はglibcに名前付きラッパーが存在するため直接呼び出し、`get_mempolicy`はラッパーが存在しないためraw syscall番号(x86_64で239)経由)。
+
+**実装中の自己レッドチーム**: 3件すべてをdenylistから除いた架空のプロファイルを与え、生カーネル検証(`_check_raw_kernel_enforcement`)が、他の本物の危険なシステムコールが正しく遮断されている状態でも、この3件が遮断されていないことを正しく検知してFAILすることを、実際にlibseccompを実機のカーネルへロードして確認する回帰テストを追加した。
+
+**検証**: libseccompの`seccomp_syscall_resolve_name`で、3件すべてが実際にこの実機のx86_64カーネルで解決可能であることを確認した。`angels/dominions_syscall_guard.py`を直接実行し、新設した3件の生カーネル検証(それぞれ実際にEPERMで拒否されることを確認)がPASSすることを確認した。リポジトリ全体のpytestを再実行し、429 passed(新設した回帰テストを含む)・既知の無関係な2件のみが残ることを確認した。
+
+**正直な注記**: この「Dockerの既定プロファイルとの体系的な比較」自体も、公式ドキュメントのページ内容(Web検索経由で取得)に基づくものであり、本プロジェクトが過去に何度も発見してきたパターン(「1つ見つけたら、同じ構造の他の抜け穴が無いか、もう一歩深く確認する」)の実践である。Docker・containerdの既定プロファイルは将来も更新され続ける可能性があるため、本件は「現時点で確認できた範囲での一致」であり、将来再度の照合が必要になりうることをBOUNDARY.mdの一般化の精神に沿って記録する。
