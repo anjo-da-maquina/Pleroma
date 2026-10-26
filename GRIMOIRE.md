@@ -1774,3 +1774,26 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: 実際のTCPループバック接続・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前の接続確立→起動後のos.write攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。allowed_dirs内の通常ファイルへの正当なos.write、およびSanctum未使用時のソケットへの正当なos.writeが、いずれも修正後も正しく成功することを確認した。`angels/sachiel_kernel_transfer_guard.py`を直接実行し、新設した3件を含む全9件がPASSすることを確認した。`tests/test_sachiel_kernel_transfer_guard.py`の全15件を直接実行し、全てPASSすることを確認した。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§CO・§CPと同じ理由により、real CIに委ねる。
 
 **real CIでの最終検証**: `ff7dfcf`のpush後、両ワークフローを具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。§CPと同様、事前のjerahmeel・CI配線チェックの機械的な再確認により、§CN・§COで繰り返した自己混入レグレッションは本件でも再発しなかった。
+
+### §CR: `ssl.SSLSocket.write()`が`send`/`sendall`とは別の第三の経路(`self._sslobj.write()`直接呼び出し)で、§CPの修正を完全に迂回していた
+
+**発見**: §CQ(os.write系4関数)を実機で確認した直後、「ssl.SSLSocketに他にも、§CPで塞いだ`send`/`sendall`以外に、独自実装で上書きされているメソッドが残っていないか」を`dir(ssl.SSLSocket)`で機械的に棚卸しした。`send`/`sendall`/`sendfile`/`sendmsg`/`sendto`/`write`の6つがいずれも`ssl.SSLSocket.__dict__`に自前の実装を持っている(基底クラス`socket.socket`のメソッドをそのまま継承していない)ことを確認し、それぞれのCPython実装を読んだところ、`write()`だけが実際の送出経路として機能することが分かった:
+
+- `sendto`: `self._sslobj is not None`(TLSハンドシェイク確立済み)の場合、無条件に`ValueError`を発生させる実装になっている。
+- `sendmsg`: TLS確立済みの場合、無条件に`NotImplementedError`を発生させる実装になっている。
+- `sendfile`: TLS確立済みの場合、内部で`self._sendfile_use_send()`(基底クラスの実装)を呼び、その中で`self.send`(§CPで塞いだ`_guarded_ssl_socket_send`)を参照している――§CPの修正がそのまま効く。
+- `write()`: `self._sslobj.write(data)`――TLSハンドシェイクを実装するC実装の`_ssl._SSLSocket`オブジェクトへの**直接**呼び出しであり、`send`・`sendall`・基底クラス`socket.socket`のいずれのメソッドも一切経由しない。
+
+実機で、自己署名証明書による本物のTLSループバック接続を確立し、Sanctum起動**前**に接続・TLSハンドシェイク済みのソケットへ、起動**後**に`ssl.SSLSocket.write()`で機密文字列`b"EXFIL-VIA-SSLSOCKET-WRITE"`を送出したところ、§CPの修正後(`send`/`sendall`はいずれもブロックされる状態)でも例外無しに成功し、受信側に実際に`b"EXFIL-VIA-SSLSOCKET-WRITE"`が届くことを確認した。
+
+**たとえ話**: §CPで「ソケットという建物の正面玄関(send)と通用口(sendall)」の両方に警備員を立てたつもりだったが、同じ建物にはもう一つ、搬入用の裏口(write)があり、そこには誰も立っていなかった。しかも裏口は、正面玄関・通用口のどちらの警備記録も経由せず、建物内部の荷物置き場(`_sslobj`、C実装のTLSセッション)へ直結していた。
+
+**原因**: §CPで「`ssl.SSLSocket`がメソッドを独自実装で上書きしている」という**カテゴリ**自体には気づいていたが、「そのクラスの`send`/`sendall`を塞いだら、同じクラスに他にも塞ぐべきメソッドが残っていないか」という**同一クラス内の横の網羅確認**を行っていなかった。§CA→§CN→§CO→§CP→§CQの連鎖はいずれも「別のAPI・別のクラス」への展開だったが、本件は「同じクラスの中の、見落としていたもう一つのメソッド」という、これまでとは一段違う粒度の見落としである。
+
+**対応**: `sefer/__init__.py`に`_ORIG_SSL_SOCKET_WRITE = ssl.SSLSocket.write`と`_guarded_ssl_socket_write`を新設し、§CO/§CPで新設した`_check_socket_send_allowed`をそのまま再利用して修正した(`write()`の引数は`data`のみで、`send`/`sendall`と同じ「接続先ホストが`allowed_hosts`に含まれているか」の検査がそのまま適用できる)。`_create_awaken()`の`awaken()`内で`ssl.SSLSocket.write = _guarded_ssl_socket_write`を追加登録した。`angels/hadraniel_socket_send_guard.py`(§CO・§CPで既に本件と同じ主題を検証していた天使)に、write()版の事前接続バイパス遮断・許可ホストへの正当な新規TLS write()の誤検知防止・Sanctum未使用時の誤検知防止の3検査を追加した。`sendto`/`sendmsg`については、実機確認の結果、TLS確立後は常に例外を発生させる実装になっており追加対策は不要と判断し、その確認結果もコード中のコメントとして明示的に残した。
+
+**一般化**: あるクラスのメソッドをモンキーパッチで塞いだ際は、「そのAPI1つを塞いだら終わり」ではなく、「同じクラス(特にサブクラスでオーバーライドが疑われるクラス)の全メソッドを`dir()`で機械的に棚卸しし、他に同種の独自実装が残っていないかを確認する」という手順を、今後の標準動作として明文化する。§CPでこの手順を踏んでいれば、§CRは§CPと同時に発見・修正できていたはずだった。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の修正のみを一時的に取り消し、`angels/hadraniel_socket_send_guard.py`を直接実行したところ、新設した3件のうち「TLS事前接続バイパス遮断・write()経路(§CR)」の検査だけが正しく「事前接続済みTLSソケットへのwrite()が遮断されなかった」としてFAILし(既存のsend/sendall版の検査は§CO・§CPの修正がそのまま残っているため影響を受けずPASSを維持)、`git stash pop`で復元したところ全10件がPASSに戻ることを確認した。`tests/test_hadraniel_socket_send_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_reintroduced_tls_write_bypass_regression`)を追加した。プッシュ前に`angels/jerahmeel_fail_open_guard.py`(正当化コメント漏れ検査)と、`angels/*.py`がCIに配線済みであることの確認(`hadraniel_socket_send_guard.py`は§COで既に`anjo_da_maquina_protocol.yml`に配線済みのため、今回は新規ファイルではなく既存ファイルの拡張であり、追加配線は不要であることも確認済み)を行い、§CN・§COで2度繰り返した自己混入レグレッションは本件でも再発しなかった。
+
+**検証**: 実際のTLSループバック接続(自己署名証明書)・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前のTLS接続確立→起動後のssl.SSLSocket.write()攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。Sanctum起動後の許可ホストへの新規TLS接続でのwrite()、およびSanctum未使用時の正当なwrite()が、いずれも修正後も正しく成功することを確認した。`angels/hadraniel_socket_send_guard.py`を直接実行し、新設した3件を含む全10件がPASSすることを確認した。`tests/test_hadraniel_socket_send_guard.py`の該当テストを、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§CO・§CP・§CQと同じ理由(このサンドボックス環境がpypi.orgへ到達できずpipが使えない)により、real CIに委ねる。
