@@ -1732,3 +1732,22 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **実装中の自己訂正(自白・2件)**: 本件をreal CIへpushしたところ、またも§CNと同じ種類の自己混入レグレッションが2件、別々の既存天使に検知された。(1) `angels/jerahmeel_fail_open_guard.py`(§BS)が、新設した`hadraniel_socket_send_guard.py`内の2箇所の`except LossOfAtaraxia: pass`に正直な注記コメントを付け忘れていたことを検知した――§CNで一度この同じ失敗をしたにもかかわらず、本件でも同じ不備を繰り返した。(2) `tests/test_angels_scripts_wired_into_ci.py`が、新設した`hadraniel_socket_send_guard.py`を`.github/workflows/anjo_da_maquina_protocol.yml`のどのステップからも呼び出していない「配線漏れ」を検知した。両方とも、ローカルでpytestを実行できない本セッションの制約により事前に気づけなかったが、既存の自動チェック(jerahmeel・配線漏れ検知)がまさに想定通りの安全網として機能した。該当箇所にコメントを追加し、ワークフローに22.89番のステップとして新設天使を追加した上で、追加の修正コミットとしてpushした。同じ種類の見落としを2度(§CN・§CO)繰り返したこと自体を、今後「新しい天使ファイルを書いたら、pushする前にjerahmeel・CI配線チェックの観点を自分でも機械的に再確認する」という具体的な手順として記録する。
 
 **real CIでの最終検証**: 上記の自己訂正を含むコミット(`a0be7bf`)のpush後、両ワークフローを具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した。§CNと同じ方法(失敗コメントが0件であることの直接確認)で、全件PASSを確認した。
+
+
+### §CP: `ssl.SSLSocket`が`send`/`sendall`を独自実装で上書きしているため、§COの修正がTLS(HTTPS)通信には及んでいなかった
+
+**発見**: §COの修正を実機で確認した直後、「TLS(HTTPS)経由の通信ではどうなるか」を確認した。`socket.socket`のサブクラスである`ssl.SSLSocket`は、`send`/`sendall`を**独自に上書きしている**(基底クラス`socket.socket`のメソッドを一切呼ばない、完全に別の実装であることをPythonのMRO(`ssl.SSLSocket.__mro__`)とメソッド参照の比較で実機確認した)。そのため、§COで`socket.socket.send`自体をモンキーパッチしても、`ssl.SSLSocket`のインスタンスには一切効果が及ばない。
+
+自己署名証明書を用いた本物のTLSループバック接続を、Sanctum起動**前**に確立し、起動**後**に`SSLSocket.send()`で機密データを送出したところ、§COの修正後でも例外無しに成功し、受信側(TLS経由)に実際にデータが届くことを確認した。これは§COより**さらに実際的な**経路である――AIが生成したコードが外部APIへ通信する場合、`requests`・`urllib`等の通常の経路は常にTLSを経由するため、素のTCPソケットを直接使うケースよりむしろ現実的な攻撃面である。
+
+**たとえ話**: §COで裏口(socket.send/sendall)に鍵をかけた。しかし、その建物には実は2つの入口があった――普段使いの裏口(`socket.socket`)と、警備が厳重に見える方の通用口(`ssl.SSLSocket`、見た目は「同じ建物の一部」だが、実は独自の鍵機構を持つ別の扉)。裏口の鍵を交換しても、通用口の鍵はそのまま古い(鍵の無い)ままだった。
+
+**原因**: Pythonのクラス継承(メソッド解決順序、MRO)に起因する、これまでの「audit eventが存在しない」という欠陥パターンとは異なる、新しい種類の見落としである――「あるクラスのメソッドをモンキーパッチで塞いだつもりでも、そのクラスをサブクラス化し同名のメソッドを独自実装で上書きしているクラスには、親クラスへのパッチが及ばない」という事実を、§COの時点では確認していなかった。
+
+**対応**: `sefer/__init__.py`に`_guarded_ssl_socket_send`/`_guarded_ssl_socket_sendall`を新設し、`ssl.SSLSocket.send`/`sendall`をモンキーパッチした。§COの`_check_socket_send_allowed`(`getpeername()`を`allowed_hosts`と照合する選別的な許可)をそのまま再利用した――`ssl.SSLSocket`は`socket.socket`のサブクラスであり、`getpeername()`は基底クラスの実装がそのまま使えるため、新しいロジックを書く必要はなかった。`angels/hadraniel_socket_send_guard.py`(§COで新設した天使)に、TLS版の事前接続バイパス遮断・許可ホストへの正当な新規TLS接続の誤検知防止検査を追加した(自己署名証明書は、リポジトリの依存関係に`cryptography`パッケージを新たに追加しないよう、`openssl` CLIをテスト実行時にその場で呼び出して生成する設計とした)。
+
+**一般化**: §CA→§CN→§CO→本件という連鎖から、「あるクラスのメソッドをモンキーパッチで防御した際は、そのクラスをサブクラス化し同名メソッドを独自実装でオーバーライドしている標準ライブラリの他のクラスが無いか」を確認する、という新しい観点を得た。本プロジェクトがこれまで蓄積してきた「1つ塞いだら同じ構造の他の穴を探す」という方法論に、「同じイベント名・同じ関数の別の呼び出し経路」(§CA・§CM)、「audit event自体が存在しないAPI」(§CN・§CO)に続く、第3のカテゴリ(「メソッドのサブクラスによる独自オーバーライド」)として追加で記録する。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の§CP分の修正のみを一時的に取り消し(§COの修正は残したまま)、`angels/hadraniel_socket_send_guard.py`を直接実行したところ、新設したTLS版の事前接続バイパス遮断検査だけが正しく「事前接続済みTLSソケットへのsend()が遮断されなかった」としてFAILし、既存のTCP版(§CO)の検査は影響を受けず正しくPASSを維持したことを確認した(§COと§CPの修正が独立して機能していることの確認)。`git stash pop`で修正を復元したところ、同じ天使の全7件がPASSに戻ることを確認した。`tests/test_hadraniel_socket_send_guard.py`にも、TLS版の検査関数を直接呼ぶ回帰テストを2件追加した。
+
+**検証**: `ssl.SSLSocket.__mro__`・メソッド参照の比較により、`send`/`sendall`が基底クラス`socket.socket`のメソッドと異なる、独自のPython実装であることを実機で確認した。自己署名証明書による本物のTLSループバック接続・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前の接続確立→起動後のSSLSocket.send攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。Sanctum起動**後**に許可ホストへ新規TLS接続して送信する正当なフローが、修正後も正しく成功することも確認した。`angels/jerahmeel_fail_open_guard.py`を直接実行し、本件の新設コードに§CN・§COで繰り返した「無言except握り潰しのコメント忘れ」が無いことを確認した(前回の自己訂正の教訓を今回は実際に活かせた)。`angels/hadraniel_socket_send_guard.py`を直接実行し、新設した7件すべてがPASSすることを確認した。`tests/test_hadraniel_socket_send_guard.py`の全12件を(pytestの`monkeypatch`フィクスチャを模した、今回は適切な後始末(undo)付きのスタブ経由で)直接実行し、全てPASSすることを確認した――当初、後始末の無い簡易スタブで実行した際、`monkeypatch`されたテストの影響が後続のテストに残り2件が見かけ上失敗する現象に遭遇したが、原因を正しく切り分け(本物のバグではなく検証ハーネス自体の不備)、スタブ側を修正して解決したことも、正直に記録する。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§COと同じ理由により、real CIに委ねる。
