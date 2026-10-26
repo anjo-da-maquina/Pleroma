@@ -543,26 +543,34 @@ def _resolve_fd_path(fd: int):
         return None
     return link
 
-def _check_fd_not_socket_for_sendfile(fd: int, api_name: str):
-    """[脆弱性修正 2026-10 §CN] `os.sendfile(out_fd, in_fd, ...)`は、
-    `out_fd`がファイルではなく**ソケット**である場合、ファイル内容を
-    ネットワーク経由でそのまま外部へ送出できる(実機で実際に、サーバー
-    側で`recv()`した内容として到達することを確認済み――本物の情報
-    持ち出しである)。しかしこのAPI自体がsys.addaudithookの監査イベントを
-    一つも発火しないため(ファイル冒頭のコメント参照)、Gatekeeper
-    (`maquina_gatekeeper.py`、イベント名の列挙に依存する設計)は構造的に
-    一度もこの呼び出しを観測できず、forbidden集合への追加では一切
-    対策にならない。本ファイル自身の`_check_fd_write_allowed`も、
-    `_resolve_fd_path`が`"socket:"`で始まるリンクを(本来ファイル書き込み
-    制限が対象とする「パス」が存在しないという正当な理由で)意図的に
-    `None`として返し、その結果チェック自体をスキップしていたため、
-    ソケット宛の送出は従来どおり無検査だった。これはファイル書き込み
-    制限(allowed_dirs)の対象外という判断としては正しいが、副作用として
-    ネットワーク送出の検査が一切行われていないことを、本関数で別途
-    明示的に塞ぐ。許可された送信先ホストかどうかを`getpeername()`等で
-    判定して選別的に許可する設計も検討したが、この隔離結界の脅威モデル
-    (使い捨てスクリプトの実行)において、ファイル内容をソケットへ直接
-    送出する正当な用途は想定されないため、保守的に無条件拒否とする。"""
+def _check_fd_not_socket(fd: int, api_name: str):
+    """[脆弱性修正 2026-10 §CN・§CQ追記で一般化] 当初`os.sendfile`
+    (§CN)専用として新設したが、`_check_fd_write_allowed`の
+    `_resolve_fd_path`は、`fd`が`"socket:"`で始まるリンクに解決される
+    場合(ファイル書き込み制限が対象とする「パス」が存在しないという
+    正当な理由で)意図的に`None`を返し、その結果チェック自体をスキップ
+    する設計になっている。これはファイル書き込み制限(allowed_dirs)の
+    対象外という判断としては正しいが、副作用として「ソケットfdへの
+    書き込み系API呼び出し全般」が無検査のまま残っていた。
+
+    §CNではこれを`os.sendfile`/`os.copy_file_range`について発見・修正
+    したが、§CQで同じ構造の欠陥が`os.write`/`os.writev`/`os.pwrite`/
+    `os.pwritev`(いずれも既存の`_guarded_os_*`ラッパーが
+    `_check_fd_write_allowed`しか呼んでおらず、本関数を呼んでいなかった
+    ため)にも及んでいることを実機で発見した――`os.write(sock.fileno(),
+    data)`で、Sanctum起動**前**に接続済みのソケットへ、起動**後**に
+    実際にデータを書き込めてしまうことを、実TCP接続で確認済みである。
+    そのため、本関数は単一のAPI専用ではなく、ソケットfdへの書き込み系
+    API呼び出し全般に対する共通の防御として一般化した。
+
+    許可された送信先ホストかどうかを`getpeername()`等で判定して選別的
+    に許可する設計(§CO・§CPのsocket.send/sendall・ssl.SSLSocket.send
+    で採用した方針)も検討したが、`os.write`等の低レベルfd APIは
+    `_guarded_os_write`等のラッパーを経由する既存の設計上、呼び出し元の
+    文脈情報(どのアプリケーション層のAPIからの呼び出しか)を失っており、
+    この隔離結界の脅威モデル(使い捨てスクリプトの実行)において、
+    ファイル書き込み用の低レベルAPIをソケットへ直接使う正当な用途は
+    想定されないため、§CNと同じ保守的な無条件拒否を維持する。"""
     if getattr(_hook_state, 'in_hook', False):
         return
     if not _is_guard_active():
@@ -579,7 +587,7 @@ def _check_fd_not_socket_for_sendfile(fd: int, api_name: str):
             _trigger_violation(
                 api_name, (fd, link),
                 f"{api_name}でソケットfd(fd={fd})への送出が試みられました"
-                f"(監査イベントの存在しないAPIによるネットワーク情報持ち出し、§CN)。"
+                f"(ソケットfdへの低レベル書き込みAPI経由のネットワーク情報持ち出し、§CN/§CQ)。"
             )
     finally:
         _hook_state.in_hook = False
@@ -610,18 +618,25 @@ _ORIG_OS_PWRITE = getattr(os, "pwrite", None)
 _ORIG_OS_PWRITEV = getattr(os, "pwritev", None)
 
 def _guarded_os_write(fd, data):
+    # [§CQ] ソケットfdへの直接書き込みは、allowed_dirsの対象外として
+    # _check_fd_write_allowedがスキップするだけでは塞がれない
+    # (_check_fd_not_socketの docstring 参照)。
+    _check_fd_not_socket(fd, "os.write")
     _check_fd_write_allowed(fd, "os.write")
     return _ORIG_OS_WRITE(fd, data)
 
 def _guarded_os_writev(fd, buffers):
+    _check_fd_not_socket(fd, "os.writev")
     _check_fd_write_allowed(fd, "os.writev")
     return _ORIG_OS_WRITEV(fd, buffers)
 
 def _guarded_os_pwrite(fd, data, offset):
+    _check_fd_not_socket(fd, "os.pwrite")
     _check_fd_write_allowed(fd, "os.pwrite")
     return _ORIG_OS_PWRITE(fd, data, offset)
 
 def _guarded_os_pwritev(fd, buffers, offset, *a, **kw):
+    _check_fd_not_socket(fd, "os.pwritev")
     _check_fd_write_allowed(fd, "os.pwritev")
     return _ORIG_OS_PWRITEV(fd, buffers, offset, *a, **kw)
 
@@ -670,12 +685,12 @@ def _guarded_os_sendfile(out_fd, in_fd, offset, count, *a, **kw):
     # 別の専用チェックで明示的に拒否する(_check_fd_write_allowedは
     # ソケットを"パス無し"として素通りさせるだけで、これのみでは
     # 塞がれない)。
-    _check_fd_not_socket_for_sendfile(out_fd, "os.sendfile")
+    _check_fd_not_socket(out_fd, "os.sendfile")
     _check_fd_write_allowed(out_fd, "os.sendfile")
     return _ORIG_OS_SENDFILE(out_fd, in_fd, offset, count, *a, **kw)
 
 def _guarded_os_copy_file_range(src, dst, count, offset_src=None, offset_dst=None):
-    _check_fd_not_socket_for_sendfile(dst, "os.copy_file_range")
+    _check_fd_not_socket(dst, "os.copy_file_range")
     _check_fd_write_allowed(dst, "os.copy_file_range")
     return _ORIG_OS_COPY_FILE_RANGE(src, dst, count, offset_src, offset_dst)
 
