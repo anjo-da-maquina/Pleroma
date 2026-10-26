@@ -619,8 +619,21 @@ jobs:
           if [ -z "$JOB_ID" ]; then
             echo "[警告] angelic-auditのjob_idを特定できませんでした。" > /tmp/anjo_job_log.txt
           else
-            gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt \
-              || echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID})。" > /tmp/anjo_job_log.txt
+            # [診断強化・自己調査中] 当初はエラーを`|| echo [警告]...`で
+            # 握り潰しており、実際に失敗した際(job_id特定自体は成功して
+            # いたにもかかわらず発生)、何が具体的に失敗したのか(HTTP
+            # ステータス・エラー本文)が一切分からなかった。原因を正しく
+            # 特定するまでの一時的な措置として、stderrと終了コードその
+            # ものをログに含めるようにする。
+            gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt 2> /tmp/anjo_job_log_stderr.txt
+            GH_API_EXIT=$?
+            if [ "$GH_API_EXIT" -ne 0 ]; then
+              {
+                echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID}, exit=${GH_API_EXIT})。"
+                echo "--- stderr ---"
+                cat /tmp/anjo_job_log_stderr.txt
+              } > /tmp/anjo_job_log.txt
+            fi
           fi
           # GitHub側のコメント本文サイズ上限(65536文字)を超えないよう、
           # 末尾(最も直近の、失敗に直結する出力が集中する部分)を優先して
