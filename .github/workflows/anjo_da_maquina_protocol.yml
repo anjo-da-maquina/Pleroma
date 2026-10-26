@@ -610,21 +610,44 @@ jobs:
         # ジョブへ分離した。このジョブが開始される時点で`angelic-audit`
         # ジョブは既に完全に終了しており、そのログはAPIから正しく取得
         # できる。
+        #
+        # [実機で再度発見した誤り・2回目(正直な自己開示)] ジョブ分離後、
+        # 実際に意図的な失敗を注入して再検証したところ、分離した
+        # `incident-log-visibility`ジョブ自身がconclusion=failureで終了し、
+        # しかもコミットコメントが1件も投稿されていなかった(件数0)。
+        # このサンドボックスはログblobストレージホストに到達できないため、
+        # 「このジョブ自身がなぜ落ちたか」を実機ログから直接読むことが
+        # できず、根本原因を直接特定できなかった。
+        # そこで方針を変えた: 根本原因を直接読めない以上、「このジョブが
+        # 何が起きても絶対に無言で落ちない」ことを設計で保証する。具体的
+        # には、(1)詳細コメントの投稿自体が失敗した場合に備え、その失敗
+        # (終了コード・stdout・stderr)だけを本文にした短いフォールバック
+        # コメントを必ず別途投稿する、(2)このジョブ自体は「可視化のため
+        # の計器」であり、計器の不調が本来のangelic-auditの失敗連座(キル
+        # スイッチ等)に影響を与えてはならないため、常に`exit 0`で終える
+        # ――とした。これにより、次に何か失敗しても、今回のように手がかり
+        # ゼロのまま終わることがなくなる。
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -o pipefail
+
+          post_comment() {
+            gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+              -F body=@"$1"
+          }
+
           JOB_ID=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
-            --jq '.jobs[] | select(.name=="聖なる統合監査 (Angelic Zero-Trust Audit)") | .id' | head -n1)
+            --jq '.jobs[] | select(.name=="聖なる統合監査 (Angelic Zero-Trust Audit)") | .id' \
+            2> /tmp/anjo_jobid_stderr.txt | head -n1)
+          JOBID_LOOKUP_EXIT=$?
           if [ -z "$JOB_ID" ]; then
-            echo "[警告] angelic-auditのjob_idを特定できませんでした。" > /tmp/anjo_job_log.txt
+            {
+              echo "[警告] angelic-auditのjob_idを特定できませんでした(exit=${JOBID_LOOKUP_EXIT})。"
+              echo "--- stderr ---"
+              cat /tmp/anjo_jobid_stderr.txt
+            } > /tmp/anjo_job_log.txt
           else
-            # [診断強化・自己調査中] 当初はエラーを`|| echo [警告]...`で
-            # 握り潰しており、実際に失敗した際(job_id特定自体は成功して
-            # いたにもかかわらず発生)、何が具体的に失敗したのか(HTTP
-            # ステータス・エラー本文)が一切分からなかった。原因を正しく
-            # 特定するまでの一時的な措置として、stderrと終了コードその
-            # ものをログに含めるようにする。
             gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt 2> /tmp/anjo_job_log_stderr.txt
             GH_API_EXIT=$?
             if [ "$GH_API_EXIT" -ne 0 ]; then
@@ -635,6 +658,7 @@ jobs:
               } > /tmp/anjo_job_log.txt
             fi
           fi
+
           # GitHub側のコメント本文サイズ上限(65536文字)を超えないよう、
           # 末尾(最も直近の、失敗に直結する出力が集中する部分)を優先して
           # 60000バイトに切り詰める(§BQと同じ方針)。
@@ -647,5 +671,33 @@ jobs:
             cat /tmp/anjo_job_log_tail.txt
             echo '```'
           } > /tmp/anjo_job_comment_body.md
-          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
-            -F body=@/tmp/anjo_job_comment_body.md
+
+          post_comment /tmp/anjo_job_comment_body.md > /tmp/anjo_post_stdout.txt 2> /tmp/anjo_post_stderr.txt
+          POST_EXIT=$?
+
+          if [ "$POST_EXIT" -ne 0 ]; then
+            # [今回追加した保険] 詳細コメント本体の投稿が何らかの理由で
+            # 失敗しても、無言で終わらせない。本文が小さく外部由来の
+            # ジョブログを含まないフォールバックコメントなら、詳細コメント
+            # を落とした同じ理由で一緒に失敗する可能性は低いと判断した。
+            {
+              echo "### ⚠️ Anjo da máquina Protocol - Angels (\`incident-log-visibility\`) — 詳細コメントの投稿自体に失敗"
+              echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+              echo "job_id特定結果: ${JOB_ID:-(特定失敗)}"
+              echo
+              echo '```'
+              echo "post exit=${POST_EXIT}"
+              echo "--- stdout ---"
+              cat /tmp/anjo_post_stdout.txt
+              echo "--- stderr ---"
+              cat /tmp/anjo_post_stderr.txt
+              echo '```'
+            } > /tmp/anjo_fallback_comment_body.md
+            post_comment /tmp/anjo_fallback_comment_body.md
+          fi
+
+          # このジョブ自体は「可視化のための計器」であり、計器の不調が
+          # 本来のangelic-audit失敗の連座(キルスイッチ等)に影響を与えて
+          # はならないため、常にexit 0で終える。成功/失敗の実態はコメント
+          # 本文そのもので伝える。
+          exit 0
