@@ -74,6 +74,14 @@ _REQUIRED_CORE_DENYLIST = {
     "socket", "connect", "bind",
     "setuid", "setgid", "capset",
     "init_module", "reboot",
+    # [新設 §CL] io_uringはseccompによるsyscall単位の監視そのものを
+    # 構造的に無効化しうる(リングバッファに提出されたI/O操作は、
+    # 対応するsyscall自体を呼ばないため、個々のsyscallを拒否する
+    # denylist/allowlistのどちらにも一度も捕捉されない)。Docker 25.0・
+    # containerdのRuntimeDefaultプロファイルが2024年に自身の既定
+    # allowlistからこれらを除外したのと同じ理由で、本プロファイルの
+    # 核心的な拒否対象に含める。GRIMOIRE.md §CL参照。
+    "io_uring_setup",
 }
 
 # [§CI] execve/execveatは逆に「denylistに含まれていてはならない」
@@ -231,6 +239,16 @@ def main():
     rc = libc.mount(b"none", b"/tmp", b"tmpfs", 0, None)
     err = ctypes.get_errno()
     results["mount"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
+
+    # [新設 §CL] io_uring_setupはglibcに名前付きラッパーが存在しない
+    # ため、libcの汎用syscall()経由で直接(raw syscall番号425、
+    # x86_64)呼び出す――これは、これを実際に迂回に使う攻撃コードが
+    # 行うのと全く同じ呼び出し方であり、Pythonレベルのラッパー(存在
+    # しない)を経由する検証では意味がない。
+    libc.syscall.restype = ctypes.c_long
+    rc = libc.syscall(425, ctypes.c_uint(0), ctypes.c_void_p(0))
+    err = ctypes.get_errno()
+    results["io_uring_setup"] = "blocked" if (rc == -1 and err == EPERM) else f"NOT_BLOCKED:rc={rc},errno={err}"
 
     results["getpid"] = "OK" if os.getpid() > 0 else "UNEXPECTED"
     tmpf = f"/tmp/dominions_raw_check_benign_{os.getpid()}.txt"
@@ -401,7 +419,7 @@ def _check_raw_kernel_enforcement() -> tuple:
     except (ValueError, IndexError) as e:
         return "FAIL", f"生カーネル検証スクリプトの出力を解析できませんでした: {e}: stdout={proc.stdout!r} stderr={proc.stderr!r}"
 
-    denied_checks = ["fork", "socket", "new_process_via_subprocess", "ptrace", "mount"]
+    denied_checks = ["fork", "socket", "new_process_via_subprocess", "ptrace", "mount", "io_uring_setup"]
     not_blocked = [k for k in denied_checks if results.get(k) != "blocked"]
     if not_blocked:
         return "FAIL", f"以下のシステムコールが、プロファイルをロードしたにもかかわらず実際には遮断されませんでした: {[(k, results.get(k)) for k in not_blocked]}"
@@ -411,7 +429,7 @@ def _check_raw_kernel_enforcement() -> tuple:
     if broken_benign:
         return "FAIL", f"denylistに含まれないはずの良性の操作が、誤って遮断・破壊されています(誤検知): {[(k, results.get(k)) for k in broken_benign]}"
 
-    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/ptrace/mountが全てEPERMで拒否され(新規プロセス生成は一切不可能)、execveを要しないgetpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
+    return "PASS", "libseccompでプロファイルと同じdenylistを実機のカーネルへロードし、fork/socket/ptrace/mount/io_uring_setupが全てEPERMで拒否され(新規プロセス生成・seccompを迂回しうるI/O提出経路のいずれも不可能)、execveを要しないgetpid・ファイルの読み書きは引き続き正常に動作することを確認しました。"
 
 
 def _check_docker_dynamic_if_possible() -> tuple:

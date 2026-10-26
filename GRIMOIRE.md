@@ -1619,3 +1619,24 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 
 **検証**: 各修正のたびに`python3 -c "import yaml; yaml.safe_load(...)"`でYAML構文が正しいことを確認した。最終的な「22.885」削除後も含め、リポジトリ全体のpytestを再実行し、426 passed・既知の無関係な2件のみが残ることを確認した(本件はYAML設定のみの変更であり、Pythonコードには一切触れていないため、ローカルpytestへの影響は無いことが期待通り確認できた)。本仕組み自体が実際に機能することは、上記「実装中の自己レッドチーム」の4回目で、実機のGitHub Actions上で確認済みである――2回目の時点で一度「確認した」と誤記したこと自体が、まさに本件が解決しようとしていた問題(「本当に機能しているかを、実機で確認せずに報告してしまう」)を自分で引き起こしてしまった事例であり、この誤りも含めて正直に記録する。
 
+
+
+### §CL: `src/sandalphon/seccomp-profile.json`のdenylistにio_uring_setup/io_uring_enter/io_uring_registerが含まれておらず、Dockerの既定seccompプロファイル(§CGでこのプロファイルに完全に置き換えた)が2024年以降io_uringを拒否対象に加えていたのと同等の防御が、本プロファイルでは一度も実現していなかった
+
+**発見**: §CKの作業を終えた後、継続的な改善の一環として、`src/sandalphon/seccomp-profile.json`自体(§CG〜§CIで作り込んだdenylist)が、network名前空間・読み取り専用rootfs・ケーパビリティ剥奪という他の層と比べて、「暴露面として本当に網羅的か」を一般公開文献を調べながら再点検した。その過程で、io_uring(io_uring_setup/io_uring_enter/io_uring_register)というLinuxの非同期I/O機構が、2024年にDocker 25.0・containerdのRuntimeDefaultプロファイルの双方から、自身の既定allowlistの対象外(=拒否)に変更されていたことを確認した。理由は、io_uringがリングバッファへI/O操作を「提出」する方式であり、対応する個々のsyscall(`connect`・`sendto`・`openat`等)自体を一度も呼ばないため、まさにそれらのsyscallを狙い撃ちで拒否するdenylist(本プロファイルの設計そのもの)が、一度も発動しないまま迂回されうる、という構造的な弱点だった。
+
+本プロファイルは`defaultAction: SCMP_ACT_ALLOW`(denylist方式)であり、これは`docker run --security-opt seccomp=...`でDocker自身の既定プロファイルを完全に置き換える(両者は併用されず、カスタムプロファイルが既定プロファイルに上書きされる)。つまり、Dockerの既定プロファイルが2024年以降io_uringの3syscallを拒否するようになっていても、本プロファイルを指定した瞬間にその防御は失われ、io_uring_setup等は(本プロファイルに明示的な拒否規則がない以上)既定のSCMP_ACT_ALLOWにより許可されたままになっていた。
+
+**たとえ話**: §CGで導入したdenylistは、建物の正面玄関・通用口・裏口など、既知の出入り口一つ一つに警備員を立てる方式だった。io_uringは、建物の設計図には最初から描かれていた「地下の資材搬入用ベルトコンベア」のようなもので、どの出入り口も通らずに荷物(I/O操作)をそのまま外へ流せる。警備員(seccompのsyscall単位の監視)は、誰かがベルトコンベアの操作レバー(`io_uring_setup`)自体に触れた瞬間までは呼び出され得るが、そのレバーへのアクセス自体を塞いでいなければ、以降の荷物の流れそのものは一度も監視対象にならない。
+
+**原因**: §CG新設当時、このプロファイルは「まず§CD・§CEで実際に発見した具体的な迂回経路(プロセス生成・ptrace・mount等)を塞ぐ」ことを目的に組まれ、Dockerの既定プロファイル自体が別途提供していたio_uring関連の防御を、カスタムプロファイルへの置き換えによって暗黙に失っていたこと自体には、これまで気づいていなかった。これは実装ミスというより、「カスタムseccompプロファイルは既定プロファイルの上に積み重なるのではなく、完全に置き換える」という前提の確認を、§CG当初に行っていなかったことによる見落としである。
+
+**対応**: `src/sandalphon/seccomp-profile.json`に、`io_uring_setup`・`io_uring_enter`・`io_uring_register`を拒否する新しいsyscall群を追加した。`angels/dominions_syscall_guard.py`の`_REQUIRED_CORE_DENYLIST`(静的な後退検知の核)に`io_uring_setup`を追加し、`_RAW_KERNEL_CHECK_SCRIPT`(libseccompを実機のカーネルへ直接ロードする生カーネル検証)にも、`io_uring_setup`を実際にraw syscall番号(x86_64で425)経由で呼び出し、EPERMで拒否されることを確認する検査を追加した(glibcに名前付きラッパーが存在しないため、`libc.syscall(425, ...)`で直接呼び出す――これは実際にこの経路を悪用するコードが行うのと全く同じ呼び出し方である)。
+
+**正直な設計方針の開示**: この隔離結界(`run_in_sandalphon()`)には、io_uringを許したままでも、独立した他の層による限定が既に効いている。`--network none`によりネットワーク名前空間自体が存在しないため、io_uring経由で`connect`/`send`相当の操作を提出しても、送り先となるネットワークインターフェース自体が存在せず失敗する。`--read-only`な root filesystemにより、io_uring経由の書き込みも、通常の`write()`と同じくVFS層でEROFSになる。つまり、本件が実際に新しく可能にしていた「具体的な悪用」は、この時点では確認できていない――これはDocker自身のメンテナが2024年にこの3つのsyscallを自分たちの既定プロファイルから外した際に示した判断(「他の層が今はたまたま塞いでいるとしても、syscall自体を監視できないという構造的な弱点を、個別に塞ぐ価値がある」)に倣った、予防的な対応である。「他の層が今は防いでいるから後回しにする」という判断こそ、本プロジェクトが避けようとしている「正しく構成できていることを確認しないまま放置する」姿勢そのものであるため、具体的な悪用実証の有無に関わらず、既知の構造的弱点として直ちに塞いだ。
+
+**一般化**: カスタムseccompプロファイル(`defaultAction: SCMP_ACT_ALLOW`のdenylist方式)を採用する場合、「Dockerの既定プロファイルが元々拒否していた全syscall」の一覧を一度洗い出し、本プロファイルのdenylistがそれを下回っていないかを確認する作業を、今後プロファイルを変更する際の恒久的なチェック項目として記録する。本件はその一覧の中でio_uring関連の3syscallだけを具体的に扱ったものであり、将来Dockerの既定プロファイルにさらなる変更(新しいsyscallの追加拒否等)があった場合、同種の再点検が必要になる。
+
+**実装中の自己レッドチーム**: `_REQUIRED_CORE_DENYLIST`から`io_uring_setup`のみを除いた架空のプロファイルを与え、(1)静的検証(`_check_profile_json_is_well_formed`)が正しくFAILし、かつ検知内容に`io_uring_setup`という名前が含まれること、(2)生カーネル検証(`_check_raw_kernel_enforcement`)が、fork/socket/ptrace/mountは正しく遮断されている状態でも、`io_uring_setup`だけが遮断されていないことを正しく検知してFAILすることを、実際にlibseccompを実機のカーネルへロードして確認する2件の回帰テストを追加した。
+
+**検証**: `libseccomp.so.2`の`seccomp_syscall_resolve_name`で、`io_uring_setup`(425)・`io_uring_enter`(426)・`io_uring_register`(427)の3名が実際にこの実機のx86_64カーネルで解決可能であることを確認した。`angels/dominions_syscall_guard.py`を直接実行し、新設した生カーネル検証(io_uring_setupを実際にraw syscall経由で呼び出し、EPERMで拒否されることを確認)がPASSすることを確認した。`tests/test_dominions_syscall_guard.py`に追加した2件の回帰テストを含む同ファイルの全19件がPASSすることを確認した。リポジトリ全体のpytestを再実行し、428 passed(新設した2件を含む)・既知の無関係な2件のみが残ることを確認した。

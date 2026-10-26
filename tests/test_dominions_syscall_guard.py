@@ -105,6 +105,25 @@ def test_profile_json_check_detects_execve_reintroduced_into_denylist(tmp_path, 
     assert "execve" in detail
 
 
+def test_profile_json_check_detects_io_uring_denylist_regression(tmp_path, monkeypatch):
+    """[核心・§CLの回帰防止] io_uring_setupがdenylistから脱落した場合に
+    正しく検知されることを確認する。io_uringはseccompによる個々の
+    syscall監視そのものを構造的に迂回しうる経路(リングバッファへの
+    I/O提出は、対応するsyscall自体を呼ばない)であり、Docker 25.0が
+    自身の既定allowlistからこれらを除外したのと同じ理由で、本件を
+    §CGの核心的な拒否対象群と同様に扱う。GRIMOIRE.md §CL参照。"""
+    bad = tmp_path / "bad.json"
+    weakened = sorted(dsg._REQUIRED_CORE_DENYLIST - {"io_uring_setup"})
+    bad.write_text(json.dumps({
+        "defaultAction": "SCMP_ACT_ALLOW",
+        "syscalls": [{"names": weakened, "action": "SCMP_ACT_ERRNO"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(dsg, "_PROFILE_PATH", bad)
+    ok, detail = dsg._check_profile_json_is_well_formed()
+    assert ok is False
+    assert "io_uring_setup" in detail
+
+
 def test_docker_run_reference_check_detects_missing_security_opt(tmp_path, monkeypatch):
     fake_root = tmp_path
     (fake_root / "src").mkdir()
@@ -131,6 +150,26 @@ def test_raw_kernel_enforcement_detects_a_denylist_that_does_not_actually_block(
     status, detail = dsg._check_raw_kernel_enforcement()
     assert status == "FAIL", detail
     assert "fork" in detail or "socket" in detail or "new_process_via_subprocess" in detail or "ptrace" in detail or "mount" in detail
+
+
+def test_raw_kernel_enforcement_detects_io_uring_setup_not_blocked(tmp_path, monkeypatch):
+    """[核心・§CLの固定] fork/socket/ptrace/mountは拒否しているが
+    io_uring_setupだけが脱落しているプロファイルを実機のカーネルへ
+    ロードした場合、本検査が実際にio_uring_setupが遮断されていない
+    ことを(他の本物の危険なシステムコールが正しく遮断されている
+    状態でも)正しく検知することを確認する。"""
+    missing_io_uring = tmp_path / "missing_io_uring.json"
+    missing_io_uring.write_text(json.dumps({
+        "defaultAction": "SCMP_ACT_ALLOW",
+        "syscalls": [{
+            "names": sorted(dsg._REQUIRED_CORE_DENYLIST - {"io_uring_setup"}),
+            "action": "SCMP_ACT_ERRNO",
+        }],
+    }), encoding="utf-8")
+    monkeypatch.setattr(dsg, "_PROFILE_PATH", missing_io_uring)
+    status, detail = dsg._check_raw_kernel_enforcement()
+    assert status == "FAIL", detail
+    assert "io_uring_setup" in detail
 
 
 def test_raw_kernel_enforcement_is_inconclusive_when_libseccomp_missing(monkeypatch):

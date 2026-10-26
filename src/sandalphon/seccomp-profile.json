@@ -87,6 +87,14 @@
       ],
       "action": "SCMP_ACT_ERRNO",
       "errnoRet": 1
+    },
+    {
+      "comment": "[§CL] io_uring. io_uring_setup/io_uring_enter/io_uring_register let a process submit I/O operations (file reads/writes, and -- depending on kernel version -- even connect/send/recv-equivalent ops) through a shared ring buffer instead of making the ordinary per-operation syscall. A seccomp filter inspects syscalls at the entry point; it cannot see what happens *inside* a ring the process already set up, so a policy that carefully denies 'socket'/'connect'/'sendto' above (or 'openat' in some other hardening scheme) would never even be consulted for the equivalent operation submitted via io_uring instead. This is exactly why Docker 25.0 and containerd's RuntimeDefault profile both removed io_uring_setup/io_uring_enter/io_uring_register from their own default allowlists in 2024. Because this profile replaces Docker's default profile entirely (a custom seccomp profile is not merged with the default, it supersedes it), omitting these three syscalls here would silently reopen exactly the gap Docker's own maintainers closed. In this jail's specific case the worst-case impact is already independently capped by --network none (no network namespace exists for an io_uring-submitted connect/send to use) and the read-only root filesystem (an io_uring-submitted write still fails with EROFS at the VFS layer, the same as a direct write() would) -- but relying on those other layers staying correctly configured forever, instead of also closing the primitive itself, is exactly the kind of unverified assumption this project avoids.",
+      "names": [
+        "io_uring_setup", "io_uring_enter", "io_uring_register"
+      ],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 1
     }
   ]
 }
