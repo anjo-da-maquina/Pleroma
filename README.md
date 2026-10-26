@@ -2,7 +2,7 @@
 
 作者: 安城巻那(アンジョウ マキナ)
 
-[English README](./README.en.md) ・ [開発ログ(読み物版)](./DEVLOG.md) ・ [全記録(GRIMOIRE.md)](./GRIMOIRE.md)
+[English README](./README.en.md) ・ [開発ログ(読み物版)](./DEVLOG.md) ・ [全記録(GRIMOIRE.md)](./GRIMOIRE.md) ・ [担当範囲の境界線(BOUNDARY.md)](./BOUNDARY.md)
 
 ## なぜ作ったか
 

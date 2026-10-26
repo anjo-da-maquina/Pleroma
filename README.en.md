@@ -2,7 +2,7 @@
 
 Author: Makina Anjo (安城巻那)
 
-[日本語README](./README.md) ・ [Dev log](./DEVLOG.md) ・ [Full record (GRIMOIRE.md, Japanese)](./GRIMOIRE.md)
+[日本語README](./README.md) ・ [Dev log](./DEVLOG.md) ・ [Full record (GRIMOIRE.md, Japanese)](./GRIMOIRE.md) ・ [Scope of responsibility (BOUNDARY.md, Japanese)](./BOUNDARY.md)
 
 ## Why I built this
 
