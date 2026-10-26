@@ -18,6 +18,14 @@ jobs:
     # (Ubuntu 26移行とPlaywright 1.56.0の非対応による依存関係インストール
     # 失敗、GRIMOIRE.md §CH参照)で、既知の安定イメージへ明示的に固定した。
     runs-on: ubuntu-22.04
+    # [新設 2026-10 §CK] 失敗時にこのジョブ自身のログを取得し
+    # (`actions: read`)、その内容をコミットコメントとして投稿する
+    # (`contents: write`)ために、デフォルトのリポジトリ設定に依存せず
+    # 本ワークフロー自身で明示的に宣言する(`sanctuary_ci.yml`の§BQと
+    # 同じ方針)。
+    permissions:
+      contents: write
+      actions: read
 
     steps:
       - name: 1. 聖域の準備 (Checkout Repository)
@@ -526,6 +534,63 @@ jobs:
         # で待つよう修正した(GRIMOIRE.md §CG参照)。
         if: success()
         run: python angels/dominions_syscall_guard.py
+
+      - name: 22.885. [一時的な自己レッドチーム・§CK実機検証用・後続commitで削除予定] 新設した22.89を実際に発火させるための意図的な失敗
+        if: success()
+        run: |
+          echo "[§CK自己レッドチーム] この一時的なステップは、22.89の失敗時ログ投稿が実際にGitHub Actions上で機能することを実機で確認するためだけに存在し、確認後の次のcommitで削除する。"
+          exit 1
+
+      - name: 22.89. 失敗時の詳細をコミットコメントとして可視化 (§CK・anjo_da_maquina_protocol.ymlにもログblobホスト到達不能対策を追加)
+        # [新設 2026-10 §CK] §BQで`sanctuary_ci.yml`に実装した「失敗時の
+        # pytest出力をコミットコメントとして投稿する」仕組みが、この
+        # ワークフロー(`anjo_da_maquina_protocol.yml`)には一度も存在して
+        # いなかった。§CH・§CJでは、この調査環境自身のネットワーク許可
+        # 一覧がログblobストレージホストへの到達を遮断しているため、本
+        # ワークフローの失敗原因を自力で一切確認できず、ユーザー本人に
+        # 2回、GitHub Actions UI上のログを直接確認してもらう必要が
+        # あった。これは単発の障害調査では許容したが、将来も同じ構造で
+        # 繰り返し発生することが明らかなため、恒久的な観測性の欠落として
+        # 本件で対応する。
+        #
+        # §BQの仕組みは単一の`pytest`実行の出力だけを対象にしていたが、
+        # 本ジョブは80以上の個別ステップから成るため、「どのステップの
+        # どの出力が失敗の核心か」を、ジョブ全体のログから自動で切り出す
+        # 必要がある。そこで、GitHub Actionsのジョブログ取得API
+        # (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`)を、
+        # このワークフロー自身の実行環境(GitHub Actionsのランナー自体)
+        # から呼び出す。このAPIは実体としてはログblobストレージへの
+        # リダイレクトだが、これを呼ぶのはこのサンドボックス(制限された
+        # プロキシ経由)ではなく、GitHub Actionsのランナー自身(通常の
+        # インターネット到達性を持つ)であるため、§BQ・§CH・§CJで
+        # 繰り返し遭遇した到達不能の制約を受けない。
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -o pipefail
+          JOB_ID=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
+            --jq '.jobs[] | select(.name=="聖なる統合監査 (Angelic Zero-Trust Audit)") | .id' | head -n1)
+          if [ -z "$JOB_ID" ]; then
+            echo "[警告] 自分自身のjob_idを特定できませんでした。" > /tmp/anjo_job_log.txt
+          else
+            gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt \
+              || echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID})。" > /tmp/anjo_job_log.txt
+          fi
+          # GitHub側のコメント本文サイズ上限(65536文字)を超えないよう、
+          # 末尾(最も直近の、失敗に直結する出力が集中する部分)を優先して
+          # 60000バイトに切り詰める(§BQと同じ方針)。
+          tail -c 60000 /tmp/anjo_job_log.txt > /tmp/anjo_job_log_tail.txt
+          {
+            echo "### 🔥 Anjo da máquina Protocol - Angels (\`angelic-audit\`) — 失敗"
+            echo "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo
+            echo '```'
+            cat /tmp/anjo_job_log_tail.txt
+            echo '```'
+          } > /tmp/anjo_job_comment_body.md
+          gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
+            -F body=@/tmp/anjo_job_comment_body.md
 
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
