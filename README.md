@@ -1,5 +1,7 @@
 ﻿# Pleroma — 生成AIが作る成果物の品質を、QAエンジニアの視点で検証し続ける個人プロジェクト
 
+作者: 安城巻那(アンジョウ マキナ)
+
 [English README](./README.en.md) ・ [開発ログ(読み物版)](./DEVLOG.md) ・ [全記録(GRIMOIRE.md)](./GRIMOIRE.md)
 
 ## なぜ作ったか

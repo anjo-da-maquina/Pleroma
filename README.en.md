@@ -1,5 +1,7 @@
 # Pleroma — a personal project to keep testing what generative AI builds
 
+Author: Makina Anjo (安城巻那)
+
 [日本語README](./README.md) ・ [Dev log](./DEVLOG.md) ・ [Full record (GRIMOIRE.md, Japanese)](./GRIMOIRE.md)
 
 ## Why I built this
