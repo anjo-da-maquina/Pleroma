@@ -247,6 +247,11 @@ def _check_sendfile_to_socket_is_blocked_end_to_end() -> tuple:
                     os.sendfile(cli.fileno(), src_fd, 0, len(secret))
                 return False, "os.sendfileによるソケットへの送出が遮断されなかった"
             except LossOfAtaraxia:
+                # [正直な注記] これは本検査が期待する「正常に遮断された」
+                # という成功パスであり、フェイルオープン(無言の握り潰し)
+                # ではない。上の_check_sendfile_write_is_blocked等と同じ
+                # 構造で、遮断後に実際にデータが届いていないことまで
+                # 確認するため、意図的に処理を先へ進めている。
                 pass
         finally:
             os.close(src_fd)
