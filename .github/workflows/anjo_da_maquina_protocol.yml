@@ -670,11 +670,30 @@ jobs:
               cat /tmp/anjo_jobid_stderr.txt
             } > /tmp/anjo_job_log.txt
           else
-            gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt 2> /tmp/anjo_job_log_stderr.txt
-            GH_API_EXIT=$?
-            if [ "$GH_API_EXIT" -ne 0 ]; then
+            # [実機で3回目に発見した誤り(正直な自己開示)] `set +e`の修正後、
+            # ついに本処理のエラーハンドリングが実際に実行され、実機の
+            # コミットコメントとして初めて具体的な失敗理由が得られた:
+            # 「the response contains terminal escape sequences; pass
+            # --allow-escape-sequences to output it anyway」。`gh api`が
+            # ジョブログ(pytestの色付き出力などANSIエスケープシーケンスを
+            # 含む)を端末への誤表示から保護するため、意図的に出力を拒否する
+            # 安全機構だった。しかし`gh api`サブコマンドにはこのフラグが
+            # 存在しない(`--allow-escape-sequences`は`gh run view`側の
+            # フラグであり、`gh api --help`には現れない)。そこで`gh api`を
+            # 使わず、同じエンドポイントをGH_TOKENを使って直接`curl`で呼ぶ
+            # ことにした。`curl`は応答バイト列をそのままファイルへ書き出す
+            # だけで、`gh`のような端末エスケープシーケンス保護を一切行わない
+            # ため、この問題を構造的に回避できる。
+            HTTP_CODE=$(curl -sL -w '%{http_code}' \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              -o /tmp/anjo_job_log.txt \
+              "https://api.github.com/repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" \
+              2> /tmp/anjo_job_log_stderr.txt)
+            CURL_EXIT=$?
+            if [ "$CURL_EXIT" -ne 0 ] || [ "${HTTP_CODE:-000}" -ge 400 ] 2>/dev/null; then
               {
-                echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID}, exit=${GH_API_EXIT})。"
+                echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID}, curl_exit=${CURL_EXIT}, http=${HTTP_CODE})。"
                 echo "--- stderr ---"
                 cat /tmp/anjo_job_log_stderr.txt
               } > /tmp/anjo_job_log.txt
