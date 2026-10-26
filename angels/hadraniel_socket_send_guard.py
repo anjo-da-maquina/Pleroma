@@ -59,6 +59,10 @@ def _check_send_to_presealed_socket_is_blocked() -> tuple:
                 cli.send(secret)
             return False, "事前接続済みソケットへのsend()が遮断されなかった"
         except LossOfAtaraxia:
+            # [正直な注記] これは本検査が期待する「正常に遮断された」
+            # という成功パスであり、フェイルオープン(無言の握り潰し)
+            # ではない。遮断後に実際にデータが届いていないことまで
+            # 確認するため、意図的に処理を先へ進めている。
             pass
 
         conn.settimeout(0.2)
@@ -95,6 +99,9 @@ def _check_sendall_to_presealed_socket_is_blocked() -> tuple:
                 cli.sendall(secret)
             return False, "事前接続済みソケットへのsendall()が遮断されなかった"
         except LossOfAtaraxia:
+            # [正直な注記] これも上と同様、本検査が期待する「正常に
+            # 遮断された」という成功パスであり、フェイルオープンでは
+            # ない。
             pass
 
         conn.settimeout(0.2)

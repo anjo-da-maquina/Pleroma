@@ -535,6 +535,31 @@ jobs:
         if: success()
         run: python angels/dominions_syscall_guard.py
 
+      - name: 22.89. ハドラニエルの門 (Hadraniel's Gate - socket.send/sendallの事前接続バイパス検知)
+        # [新設 2026-10 §CO] §CNの調査直後、同じ「audit eventが存在しない
+        # API」という観点を通信系APIに広げて再確認したところ、
+        # `socket.socket.send()`/`sendall()`が、実機で確認した限り一度も
+        # audit eventを発火しないことが判明した。`angels/
+        # jegudiel_exfiltration_guard.py`の§CA時点のコメントは「必ず
+        # 事前のconnectを要するため検査不要」と判断していたが、これは
+        # §CB・§CD・§CNで繰り返し発見している「Sanctum起動前に確保した
+        # fd・接続は起動後も検査を素通りする」という前提openedバイパスの
+        # 構造を見落としていた。実機で、Sanctum起動前に実TCP接続を確立し、
+        # 起動後に`.send()`で実際のデータを送出する完全な攻撃チェーンが、
+        # 無条件に成功し受信側に実際にデータが届くことを確認した。
+        #
+        # `sefer/__init__.py`に`_guarded_socket_send`/
+        # `_guarded_socket_sendall`を新設し、`getpeername()`で接続先
+        # ホストを解決して`allowed_hosts`と照合する選別的な許可(§CNの
+        # os.sendfileとは異なり、無条件拒否ではなく既存の
+        # `_michael_absolute_defense`と同じ方針)で修正した。調査中、
+        # "socket.__new__"が`ALWAYS_PASSTHROUGH_AUDIT_EVENTS`に含まれて
+        # おらず、`allowed_hosts`を指定していてもソケット生成自体が常に
+        # 無条件拒否される別の誤検知(fail-closed方向、セキュリティ
+        # ホールではない)も発見・修正した(GRIMOIRE.md §CO参照)。
+        if: success()
+        run: python angels/hadraniel_socket_send_guard.py
+
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
         run: python angels/gehenna_void_entropy.py
