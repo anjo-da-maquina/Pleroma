@@ -1,4 +1,4 @@
-import sys, os, tempfile
+import sys, os, socket, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
@@ -192,11 +192,128 @@ def _check_copy_file_range_inside_allowed_dirs_is_not_falsely_blocked() -> tuple
         return True, "OK"
 
 
+# [新設 2026-10 §CN] §CDの修正(上記)は「fd事前オープンによる
+# allowed_dirs外への**書き込み**」という観点のみを塞いだものだった。
+# §CKの「続けて」作業の中で、同じos.sendfileについて別の観点――
+# 送り先fdがファイルではなく**ソケット**である場合、ファイルの内容を
+# そのままネットワーク経由で外部に送出できてしまう――を再検証したところ、
+# `sefer/__init__.py`の`_resolve_fd_path`が、送り先fdが`"socket:"`で
+# 始まるリンクに解決される場合、意図的に`None`を返して
+# `_check_fd_write_allowed`のチェック自体をスキップしていたことが
+# 判明した(ファイル書き込み制限の観点では「パスが存在しないので対象外」
+# という正しい判断だったが、ネットワーク送出の観点では無検査のまま
+# だったという副作用)。実機で、Sanctum起動**前**に接続済みの実TCP
+# ソケットへ、Sanctum起動**後**にos.sendfileでファイル内容を送出する
+# 攻撃が例外無しで成功し、受信側で実際にファイル内容を受信できることを
+# 確認した(本物の情報持ち出し)。`_check_fd_not_socket_for_sendfile`を
+# 新設してこの経路を明示的に拒否する修正の、継続的な再検証を本天使が
+# 担う。
+#
+# [正直な注記: 本検査の限界] `os.copy_file_range`はLinuxカーネル側の
+# 制約により、両端が通常ファイル(regular file)である場合のみ動作し、
+# ソケットfdを渡すと`OSError(EINVAL)`になる(実機で確認済み)。そのため
+# 本検査はos.sendfileのソケット経路のみを対象とし、copy_file_rangeの
+# ソケット版は検査対象に含めていない(検査不要と判断した境界)。
+
+
+def _check_sendfile_to_socket_is_blocked_end_to_end() -> tuple:
+    """[核心・§CN] Sanctum起動**前**に接続済みの実ソケットへ、Sanctum
+    起動**後**にos.sendfileでファイル内容を送出する攻撃が、実際に
+    遮断されることを確認する(「事前オープンfdバイパス」の前提条件を
+    満たした、完全な実攻撃チェーンでの検証)。"""
+    from sefer import Sanctum, LossOfAtaraxia
+
+    # Sanctum起動前に、実際のTCPループバック接続を確立する
+    # (socket.connect自体はmichaelの深層保護で遮断されるため、
+    #  ガードが有効になる前に接続を済ませておく必要がある)。
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    cli.connect(("127.0.0.1", port))
+    conn, _ = srv.accept()
+
+    secret = b"secret-file-content-to-exfiltrate"
+    vfd, vpath = tempfile.mkstemp(prefix="sachiel_secret_")
+    os.write(vfd, secret)
+    os.close(vfd)
+
+    try:
+        src_fd = os.open(vpath, os.O_RDONLY)
+        try:
+            try:
+                with Sanctum(allowed_dirs=["/tmp/sachiel_nonexistent_jail"]):
+                    os.sendfile(cli.fileno(), src_fd, 0, len(secret))
+                return False, "os.sendfileによるソケットへの送出が遮断されなかった"
+            except LossOfAtaraxia:
+                pass
+        finally:
+            os.close(src_fd)
+
+        # [正直な注記] 遮断後、実際にデータが届いていないことまで確認する
+        # (例外が出ただけで、カーネル側では一部転送済みという可能性を
+        # 排除するため)。ノンブロッキングで即座に確認する。
+        conn.settimeout(0.2)
+        try:
+            leaked = conn.recv(len(secret))
+        except socket.timeout:
+            leaked = b""
+        if leaked:
+            return False, f"遮断されたはずだが、実際にデータが{leaked!r}として届いている"
+        return True, "OK"
+    finally:
+        cli.close()
+        conn.close()
+        srv.close()
+        os.remove(vpath)
+
+
+def _check_sendfile_to_socket_without_sanctum_is_unaffected() -> tuple:
+    """[誤検知防止・§CN] Sanctumを一切使っていない通常時(ガード非有効)
+    は、ソケットへの正当なos.sendfileが誤って遮断されないことを確認
+    する(本検査自体がsefer全体を誤作動させていないかの確認)。"""
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    cli = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    cli.connect(("127.0.0.1", port))
+    conn, _ = srv.accept()
+
+    payload = b"non-sealed legit sendfile"
+    vfd, vpath = tempfile.mkstemp(prefix="sachiel_legit_")
+    os.write(vfd, payload)
+    os.close(vfd)
+
+    try:
+        src_fd = os.open(vpath, os.O_RDONLY)
+        try:
+            os.sendfile(cli.fileno(), src_fd, 0, len(payload))
+        except Exception as e:
+            return False, f"Sanctum未使用時にos.sendfileが誤って失敗した: {e}"
+        finally:
+            os.close(src_fd)
+
+        conn.settimeout(1.0)
+        received = conn.recv(len(payload))
+        if received != payload:
+            return False, f"送出されるべきデータが正しく届いていない: {received!r}"
+        return True, "OK"
+    finally:
+        cli.close()
+        conn.close()
+        srv.close()
+        os.remove(vpath)
+
+
 CHECKS = [
     ("sefer._guarded_os_sendfile: fd事前オープン書き込み遮断", _check_sendfile_write_is_blocked),
     ("sefer._guarded_os_copy_file_range: fd事前オープン書き込み遮断", _check_copy_file_range_write_is_blocked),
     ("sefer._guarded_os_sendfile: allowed_dirs内の誤検知防止", _check_sendfile_inside_allowed_dirs_is_not_falsely_blocked),
     ("sefer._guarded_os_copy_file_range: allowed_dirs内の誤検知防止", _check_copy_file_range_inside_allowed_dirs_is_not_falsely_blocked),
+    ("sefer._guarded_os_sendfile: ソケット宛送出遮断(§CN・事前接続バイパス込み)", _check_sendfile_to_socket_is_blocked_end_to_end),
+    ("sefer._guarded_os_sendfile: Sanctum未使用時のソケット送出への誤検知防止(§CN)", _check_sendfile_to_socket_without_sanctum_is_unaffected),
 ]
 
 
@@ -223,8 +340,8 @@ def main():
         report_fail(
             NAME,
             f"Sanctumのos.sendfile/os.copy_file_rangeによるfd事前オープン"
-            f"迂回防止に、少なくとも1つの既知の問題が再発しています"
-            f"(§CDの回帰): {detail}",
+            f"迂回防止(書き込み・ソケット送出の両方)に、少なくとも1つの"
+            f"既知の問題が再発しています(§CD/§CNの回帰): {detail}",
             evidence={"failures": failures},
         )
         return
@@ -232,8 +349,10 @@ def main():
     report_pass(
         NAME,
         "os.sendfile/os.copy_file_rangeによるfd事前オープン書き込み"
-        "バイパスが正しく遮断され、かつallowed_dirs内の正当な利用は"
-        "誤って遮断されないことを確認しました。",
+        "バイパス(§CD)、およびos.sendfileによるソケット宛のネットワーク"
+        "情報持ち出しバイパス(§CN)がいずれも正しく遮断され、かつ"
+        "allowed_dirs内・Sanctum未使用時の正当な利用は誤って遮断されない"
+        "ことを確認しました。",
     )
 
 

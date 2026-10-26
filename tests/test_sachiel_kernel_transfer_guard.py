@@ -56,6 +56,44 @@ def test_check_copy_file_range_inside_allowed_dirs_is_not_falsely_blocked_direct
     assert success is True, detail
 
 
+def test_check_sendfile_to_socket_is_blocked_end_to_end_directly():
+    """[新設 §CN] §CDの修正は書き込み先がファイルである場合のみを
+    想定しており、送り先fdがソケットである場合は`_resolve_fd_path`が
+    `None`を返して検査自体をスキップしていた。Sanctum起動前に接続
+    済みの実ソケットへ、起動後にos.sendfileでファイル内容を送出する
+    完全な実攻撃チェーンが遮断されることを、本テストが継続的に
+    再検証する。"""
+    success, detail = skt._check_sendfile_to_socket_is_blocked_end_to_end()
+    assert success is True, detail
+
+
+def test_check_sendfile_to_socket_without_sanctum_is_unaffected_directly():
+    success, detail = skt._check_sendfile_to_socket_without_sanctum_is_unaffected()
+    assert success is True, detail
+
+
+def test_battery_detects_reintroduced_sendfile_socket_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CN] `sefer/__init__.py`の
+    `_check_fd_not_socket_for_sendfile`が(将来の変更で)再び呼ばれなく
+    なった場合、本天使が正しく「遮断されなかった」として検知すること
+    を、実際にgit stashでこの退行を再現して確認済み(修正前は本テスト
+    と同じ失敗を実機で確認し、修正後はPASSに戻ることを確認した)。"""
+    def _vulnerable_check():
+        return False, "os.sendfileによるソケットへの送出が遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("sefer._guarded_os_sendfile: fd事前オープン書き込み遮断", skt._check_sendfile_write_is_blocked),
+        ("sefer._guarded_os_sendfile: allowed_dirs内の誤検知防止", skt._check_sendfile_inside_allowed_dirs_is_not_falsely_blocked),
+        ("sefer._guarded_os_sendfile: ソケット宛送出遮断(§CN・事前接続バイパス込み)", _vulnerable_check),
+        ("sefer._guarded_os_sendfile: Sanctum未使用時のソケット送出への誤検知防止(§CN)", skt._check_sendfile_to_socket_without_sanctum_is_unaffected),
+    ]
+    monkeypatch.setattr(skt, "CHECKS", patched_checks)
+
+    failures = skt.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "sefer._guarded_os_sendfile: ソケット宛送出遮断(§CN・事前接続バイパス込み)"
+
+
 def test_battery_detects_reintroduced_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CD修正前の、os.sendfile/
     os.copy_file_rangeを一切ラップしない実装に戻した場合、本天使が
