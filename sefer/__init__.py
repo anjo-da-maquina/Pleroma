@@ -172,6 +172,21 @@ _HARD_DENY_EVENTS = {
 ALWAYS_PASSTHROUGH_AUDIT_EVENTS = frozenset({
     "os.stat", "os.listdir", "os.getcwd", "os.path",
     "socket.getaddrinfo", "socket.socket", "socket.__init__",
+    # [脆弱性修正 2026-10 §CO追記] "socket.socket"/"socket.__init__"は、
+    # このコメントが書かれた時点で想定していたイベント名だったと見られるが、
+    # 実機(CPython 3.13)で実際に`sys.addaudithook`で捕捉したところ、
+    # ソケット生成時に本当に発火するイベント名は"socket.__new__"であり、
+    # この一覧に含まれていなかったことを確認した。その結果、
+    # `allowed_hosts`を指定してSanctumを起動していても、**ソケットの
+    # 生成そのもの**(`socket.socket(...)`、ホスト情報を一切持たない)が
+    # 無条件に`_trigger_violation`されてしまい、許可ホストへの接続を含む
+    # 正当な通信フローが、接続を試みる前の時点で常に失敗する
+    # fail-closed方向の誤検知(過剰ブロック)になっていたことを実機で
+    # 確認した(セキュリティホールではなく、allowed_hosts機能そのものが
+    # 事実上使えなくなっていたという可用性側の欠陥)。ホストの許可判定は、
+    # 実際にホスト情報を伴って発火する"socket.connect"等で引き続き
+    # 正しく行われるため、生成イベント自体は安全に通過させてよい。
+    "socket.__new__",
 })
 
 # Pythonの audit event 名として妥当な形式のみ許可（例: "os.system", "subprocess.Popen"）。
@@ -663,6 +678,79 @@ def _guarded_os_copy_file_range(src, dst, count, offset_src=None, offset_dst=Non
     _check_fd_write_allowed(dst, "os.copy_file_range")
     return _ORIG_OS_COPY_FILE_RANGE(src, dst, count, offset_src, offset_dst)
 
+# [脆弱性修正 2026-10 §CO] §CNの調査直後、同じ「audit eventが存在しない
+# API」という観点を、プロセス起動・通信系の他のAPIにも体系的に広げて
+# 再確認したところ、`socket.socket.send()`/`sendall()`が、実機で確認した
+# 限り**一度も**audit eventを発火しないことが判明した(§CA・§CM・ファイル
+# 先頭のコメントが記録している`socket.connect`/`socket.sendto`/
+# `socket.sendmsg`は、いずれも別個の、ちゃんと存在するeventである――
+# `send`/`sendall`はそれらとは違い、そもそもイベント自体が無い)。
+#
+# `angels/jegudiel_exfiltration_guard.py`の§CA時点のコメントは、
+# 「TCP経由のsend/sendallは専用eventを持たないが、必ず事前のconnectを
+# 要する(=forbidden集合で遮断済み)ため検査不要」と判断していた。しかし
+# これは、§CN・§CD等で繰り返し発見している「Sanctum起動**前**に確保した
+# fd・接続は、起動後も検査を素通りする」という同じ前提openedバイパスの
+# 構造を見落としていた――実機で確認したところ、Sanctum起動**前**に
+# connect()しておいたソケットは、起動**後**に`.send()`/`.sendall()`で
+# データを送出しても、`_michael_absolute_defense`は一度も呼ばれず
+# (そもそも監査イベントが発火しないため)、無条件に成功した。これは
+# §CNのsendfileより影響が大きい――sendfileより遥かに一般的に使われる
+# 「ソケットへの通常のデータ送信」そのものが、無検査だったことになる。
+#
+# [設計方針の違い: §CNとの比較] §CNのos.sendfileは「ソケット宛の送出に
+# 正当な用途が想定されない」として無条件拒否を選んだが、本件のsend/
+# sendallは**ソケット通信そのものの正規の手段**であり、Sanctum起動後に
+# 許可されたホスト(allowed_hosts)へ接続して送信する、という正当な
+# フローを壊してはならない。そのため、既存の`_michael_absolute_defense`
+# の「2. ソケット通信検査」が`connect`/`sendto`/`sendmsg`に対して行って
+# いるのと同じ方針――`getpeername()`で接続先ホストを解決し、
+# `allowed_hosts`ポリシーと照合する選別的な許可――を、ここでも採用する。
+# これにより、起動後に許可ホストへ接続して送信する正当な利用は引き続き
+# 許可され、起動**前**に許可外のホストへ接続しておいたソケットからの
+# 送出だけが、正しく拒否される。
+_ORIG_SOCKET_SEND = socket.socket.send
+_ORIG_SOCKET_SENDALL = socket.socket.sendall
+
+
+def _check_socket_send_allowed(sock, api_name: str):
+    if getattr(_hook_state, 'in_hook', False):
+        return
+    if not _is_guard_active():
+        return
+    _hook_state.in_hook = True
+    try:
+        policy = _get_current_policy()
+        try:
+            peer = sock.getpeername()
+        except OSError:
+            # [正直な注記] 未接続(UDPソケット等)や既に切断されたソケット
+            # への呼び出しは、OSError自体がこの直後に発生して処理が
+            # 終わるため、ここでの拒否は不要(安全側に、呼び出し自体は
+            # そのまま素通りさせて元のOSErrorに委ねる)。
+            return
+        target_host = peer[0] if isinstance(peer, tuple) and peer else None
+        allowed_hosts = policy.get("allowed_hosts", set())
+        if not target_host or target_host not in allowed_hosts:
+            _trigger_violation(
+                api_name, (target_host,),
+                f"{api_name}でソケットの送信先'{target_host}'が許可リストに"
+                f"含まれていません(Sanctum起動前の事前接続バイパス対策、§CO)。"
+            )
+    finally:
+        _hook_state.in_hook = False
+
+
+def _guarded_socket_send(self, *a, **kw):
+    _check_socket_send_allowed(self, "socket.send")
+    return _ORIG_SOCKET_SEND(self, *a, **kw)
+
+
+def _guarded_socket_sendall(self, *a, **kw):
+    _check_socket_send_allowed(self, "socket.sendall")
+    return _ORIG_SOCKET_SENDALL(self, *a, **kw)
+
+
 def _create_awaken():
     _awakened = False
     def awaken():
@@ -681,6 +769,8 @@ def _create_awaken():
             os.sendfile = _guarded_os_sendfile
         if _ORIG_OS_COPY_FILE_RANGE:
             os.copy_file_range = _guarded_os_copy_file_range
+        socket.socket.send = _guarded_socket_send
+        socket.socket.sendall = _guarded_socket_sendall
         _awakened = True
     return awaken
 

@@ -146,7 +146,18 @@ def run_battery():
     for name, check_fn in CHECKS:
         try:
             success, detail = check_fn()
-        except Exception as e:
+        except BaseException as e:
+            # [脆弱性修正 2026-10 §CO追記] sefer.LossOfAtaraxia等、
+            # BaseExceptionを直接継承する例外は`except Exception`では
+            # 捕捉されず、検査関数が想定外にそれを発生させた場合、
+            # 本来「安全側に倒して失敗として報告する」はずの設計が
+            # 機能せず、run_battery自体が未処理の例外で丸ごと落ちて
+            # しまう(angels/hadraniel_socket_send_guard.pyの新設時に
+            # 実機で発見)。KeyboardInterrupt/SystemExit等も含め
+            # 広く捕捉するが、本関数の唯一の責務は「1件の検査関数の
+            # 呼び出し結果を安全に報告する」ことであり、ここで拾った
+            # 例外は再送出せずfailuresに記録するだけなので、プロセス
+            # 全体の正常なシャットダウン経路を妨げない。
             failures.append((name, f"検査関数自体が例外を発生: {type(e).__name__}: {e}"))
             continue
         if not success:
