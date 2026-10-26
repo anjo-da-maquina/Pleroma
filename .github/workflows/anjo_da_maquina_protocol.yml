@@ -535,12 +535,6 @@ jobs:
         if: success()
         run: python angels/dominions_syscall_guard.py
 
-      - name: 22.885. [一時的な自己レッドチーム・§CK実機検証用・確認後に削除予定] incident-log-visibilityジョブを実際に発火させるための意図的な失敗
-        if: success()
-        run: |
-          echo "[§CK自己レッドチーム・2回目] この一時的なステップは、別ジョブへ分離したincident-log-visibilityが実際にGitHub Actions上で機能することを実機で確認するためだけに存在し、確認後の次のcommitで削除する。"
-          exit 1
-
       - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
         if: failure() || cancelled()
         run: python angels/gehenna_void_entropy.py
