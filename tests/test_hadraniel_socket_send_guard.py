@@ -68,6 +68,22 @@ def test_check_new_connect_to_disallowed_host_is_still_blocked_directly():
     assert success is True, detail
 
 
+def test_check_tls_send_to_presealed_socket_is_blocked_directly():
+    """[新設 §CP] §CO(socket.send/sendall)の修正を実機で確認した直後、
+    `ssl.SSLSocket`が`send`/`sendall`を独自に上書きしている(基底クラス
+    `socket.socket`のメソッドを呼ばない)ため、§COの修正がTLS通信には
+    一切及ばないことを発見した。本テストは、Sanctum起動前に接続済みの
+    実TLSソケットへの、起動後のsend()による送出が遮断されることを、
+    継続的に再検証する。"""
+    success, detail = hsg._check_tls_send_to_presealed_socket_is_blocked()
+    assert success is True, detail
+
+
+def test_check_tls_send_to_newly_connected_allowed_host_is_not_falsely_blocked_directly():
+    success, detail = hsg._check_tls_send_to_newly_connected_allowed_host_is_not_falsely_blocked()
+    assert success is True, detail
+
+
 def test_battery_detects_reintroduced_send_bypass_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CO修正前の、socket.send/sendallを
     一切ラップしない実装に戻した場合、本天使が正しく「遮断されなかった」

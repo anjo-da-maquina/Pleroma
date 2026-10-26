@@ -4,6 +4,7 @@ import ast
 import base64
 import codecs
 import socket
+import ssl
 import json
 import re
 import time
@@ -751,6 +752,45 @@ def _guarded_socket_sendall(self, *a, **kw):
     return _ORIG_SOCKET_SENDALL(self, *a, **kw)
 
 
+# [脆弱性修正 2026-10 §CP] 上記の`socket.socket.send`/`sendall`の修正
+# (§CO)を実機で確認した直後、「TLS(HTTPS)経由の通信ではどうなるか」を
+# 再確認したところ、`ssl.SSLSocket`が`send`/`sendall`を**独自に
+# 上書きしている**(`socket.socket`のメソッドを呼ばない、全く別の実装)
+# ことを実機で確認した。そのため、§COで`socket.socket.send`自体を
+# モンキーパッチしても、`ssl.SSLSocket`のインスタンス(`ssl.wrap_socket`
+# や`SSLContext.wrap_socket`が返す、`requests`・`urllib`等が内部で
+# 実際に使っているTLSソケット)には一切効果が及ばない。実機で、自己
+# 署名証明書を用いた本物のTLSループバック接続を確立し、Sanctum起動
+# **後**に`SSLSocket.send()`で機密データを送出したところ、§COの修正後
+# でも例外無しに成功し、受信側に実際にデータが届くことを確認した――
+# §COより**さらに実際的な**経路である(AIが生成したコードが外部APIへ
+# 通信する場合、`requests`等の通常の経路は常にTLSを経由するため)。
+#
+# [一般化] §CA→§CN→§CO→本件という連鎖は、「あるクラスのメソッドを
+# モンキーパッチで塞いだつもりでも、そのクラスをサブクラス化し同名の
+# メソッドを独自実装で上書きしているクラスには、親クラスへのパッチが
+# 及ばない」という、Pythonのメソッド解決順序(MRO)に起因する、
+# これまでとは異なる種類の見落としである。`socket.socket`のメソッドを
+# 塞いだ際、「このメソッドをオーバーライドしている標準ライブラリの
+# サブクラスは他に無いか」を確認する、という新しい観点を得た。
+#
+# 対応は§COの`_check_socket_send_allowed`をそのまま再利用する
+# (`ssl.SSLSocket`は`socket.socket`のサブクラスであり、`getpeername()`
+# は基底クラスの実装がそのまま使える)。
+_ORIG_SSL_SOCKET_SEND = ssl.SSLSocket.send
+_ORIG_SSL_SOCKET_SENDALL = ssl.SSLSocket.sendall
+
+
+def _guarded_ssl_socket_send(self, *a, **kw):
+    _check_socket_send_allowed(self, "ssl.SSLSocket.send")
+    return _ORIG_SSL_SOCKET_SEND(self, *a, **kw)
+
+
+def _guarded_ssl_socket_sendall(self, *a, **kw):
+    _check_socket_send_allowed(self, "ssl.SSLSocket.sendall")
+    return _ORIG_SSL_SOCKET_SENDALL(self, *a, **kw)
+
+
 def _create_awaken():
     _awakened = False
     def awaken():
@@ -771,6 +811,8 @@ def _create_awaken():
             os.copy_file_range = _guarded_os_copy_file_range
         socket.socket.send = _guarded_socket_send
         socket.socket.sendall = _guarded_socket_sendall
+        ssl.SSLSocket.send = _guarded_ssl_socket_send
+        ssl.SSLSocket.sendall = _guarded_ssl_socket_sendall
         _awakened = True
     return awaken
 
