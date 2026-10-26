@@ -1753,3 +1753,22 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: `ssl.SSLSocket.__mro__`・メソッド参照の比較により、`send`/`sendall`が基底クラス`socket.socket`のメソッドと異なる、独自のPython実装であることを実機で確認した。自己署名証明書による本物のTLSループバック接続・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前の接続確立→起動後のSSLSocket.send攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。Sanctum起動**後**に許可ホストへ新規TLS接続して送信する正当なフローが、修正後も正しく成功することも確認した。`angels/jerahmeel_fail_open_guard.py`を直接実行し、本件の新設コードに§CN・§COで繰り返した「無言except握り潰しのコメント忘れ」が無いことを確認した(前回の自己訂正の教訓を今回は実際に活かせた)。`angels/hadraniel_socket_send_guard.py`を直接実行し、新設した7件すべてがPASSすることを確認した。`tests/test_hadraniel_socket_send_guard.py`の全12件を(pytestの`monkeypatch`フィクスチャを模した、今回は適切な後始末(undo)付きのスタブ経由で)直接実行し、全てPASSすることを確認した――当初、後始末の無い簡易スタブで実行した際、`monkeypatch`されたテストの影響が後続のテストに残り2件が見かけ上失敗する現象に遭遇したが、原因を正しく切り分け(本物のバグではなく検証ハーネス自体の不備)、スタブ側を修正して解決したことも、正直に記録する。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§COと同じ理由により、real CIに委ねる。
 
 **real CIでの最終検証**: `aac718d`のpush後、両ワークフローを具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件、§CN・§COと同じ直接確認方法)。今回は、事前にjerahmeel・CI配線チェックの観点を自分で機械的に再確認していたため、§CN・§COで2度繰り返した自己混入レグレッションを本件では再発させずに済んだ。
+
+
+### §CQ: `os.write`系4関数も、ソケットfdへの書き込みが§CNと同じ構造で無検査だった(最も基本的な低レベルAPIに潜んでいた同種の穴)
+
+**発見**: §CP(ssl.SSLSocket)の修正を実機で確認した直後、「ソケットfdへの書き込み系APIが他にも無検査になっていないか」を体系的に再確認した。§CDで新設した`os.write`/`os.writev`/`os.pwrite`/`os.pwritev`のラッパー(`_guarded_os_write`等)は、いずれも`_check_fd_write_allowed`のみを呼んでいたが、同関数の内部で使う`_resolve_fd_path`は、fdが`"socket:"`で始まるリンクに解決される場合、意図的に`None`を返してチェック自体をスキップする設計だった――これは§CNで発見した`os.sendfile`/`os.copy_file_range`の欠陥と、全く同じ構造である。
+
+実機で、Sanctum起動**前**に接続済みのソケットへ、起動**後**に`os.write(sock.fileno(), data)`で実際のデータを書き込んだところ、例外無しに成功し、受信側に実際にデータが届くことを確認した。`os.sendfile`よりも**さらに基本的な**低レベルAPI(ほぼ全てのファイル・fd書き込みの根底にある関数)が、実は同じ穴を最初から持っていたことになる。
+
+**たとえ話**: §CNで「ベルの鳴らない勝手口(sendfile)」を見つけて塞いだ際、実はその勝手口のすぐ横に、建物の基礎そのものに空いていた、もっと古くて大きな穴(os.write)があったことに気づかなかった。§CDの時点で「ソケットは書き込み制限の対象外」と正しく判断した設計判断が、"対象外=無条件許可"と"対象外=検査不要だが別の脅威は別途確認する"の違いを埋めずに残っていた。
+
+**原因**: §CDで`_check_fd_write_allowed`/`_resolve_fd_path`を設計した際の判断(「ソケットにはallowed_dirsと比較すべきパスが存在しない」)自体は正しかったが、§CNで気づいたはずの「その判断の副作用(ネットワーク送出の検査が丸ごと消える)」を、§CNではsendfile/copy_file_rangeのみに限定して修正し、同じ`_check_fd_write_allowed`を呼んでいる他の関数群(os.write系4関数)には適用し忘れていた。§CA→§CN→§CO→§CPの連鎖と同じ「個別の具体例への対応がカテゴリ全体に及んでいなかった」というパターンの、もう一つの再発である。
+
+**対応**: §CNで新設した`_check_fd_not_socket_for_sendfile`を`_check_fd_not_socket`に一般化(docstringも、sendfile専用の説明から、ソケットfdへの書き込み系API全般に対する共通防御である旨に更新)し、`_guarded_os_write`/`_guarded_os_writev`/`_guarded_os_pwrite`/`_guarded_os_pwritev`の4関数すべてに追加した。`angels/sachiel_kernel_transfer_guard.py`(§CD・§CNで既に本件と同じ主題を検証していた天使)に、os.write版の事前接続バイパス遮断・allowed_dirs内の誤検知防止・Sanctum未使用時の誤検知防止の3検査を追加した。
+
+**一般化**: 本件は、「あるfd渡し用の共通関数(`_check_fd_write_allowed`)の、ある特定目的のための正しい設計判断(ソケットをスキップ)が、その関数を呼ぶ**すべての**呼び出し元に、意図しない副作用として伝播する」という教訓である。§CNの修正時に、`_check_fd_write_allowed`を呼んでいる全呼び出し元(os.write系4関数+sendfile+copy_file_range、計6箇所)を一度に列挙して確認していれば、本件は§CNの時点で同時に見つかっていたはずだった。今後、ある共通関数の挙動を変更・補強する際は、「その関数の呼び出し元を`grep`等で全て列挙し、同じ修正が必要な箇所が他に無いかを機械的に確認する」という具体的な手順を、今後の見直し全般に適用する教訓として記録する。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の修正のみを一時的に取り消し、`angels/sachiel_kernel_transfer_guard.py`を直接実行したところ、新設した`os.write`版の事前接続バイパス検査だけが正しく「os.writeによるソケットfdへの書き込みが遮断されなかった」としてFAILし(既存のsendfile/copy_file_range版の検査は§CNの修正がそのまま残っているため影響を受けずPASSを維持)、`git stash pop`で復元したところ全9件がPASSに戻ることを確認した。`tests/test_sachiel_kernel_transfer_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_reintroduced_os_write_socket_regression`)を追加した。本件では、§CN・§COで2度繰り返した自己混入レグレッション(無言exceptのコメント忘れ・CI配線漏れ)を事前に`angels/jerahmeel_fail_open_guard.py`で確認してから対処し、両方とも発生しなかった。
+
+**検証**: 実際のTCPループバック接続・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前の接続確立→起動後のos.write攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。allowed_dirs内の通常ファイルへの正当なos.write、およびSanctum未使用時のソケットへの正当なos.writeが、いずれも修正後も正しく成功することを確認した。`angels/sachiel_kernel_transfer_guard.py`を直接実行し、新設した3件を含む全9件がPASSすることを確認した。`tests/test_sachiel_kernel_transfer_guard.py`の全15件を直接実行し、全てPASSすることを確認した。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§CO・§CPと同じ理由により、real CIに委ねる。

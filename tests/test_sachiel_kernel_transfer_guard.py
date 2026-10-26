@@ -122,3 +122,47 @@ def test_checker_exception_is_reported_as_a_failure(monkeypatch):
     failures = skt.run_battery()
     assert len(failures) == 1
     assert "boom" in failures[0][1]
+
+
+def test_check_os_write_to_presealed_socket_is_blocked_end_to_end_directly():
+    """[新設 §CQ] §CP(ssl.SSLSocket)の修正を確認した直後、同じ観点を
+    os.write系4関数に広げて再確認したところ、`_guarded_os_write`等が
+    `_check_fd_write_allowed`のみを呼び、ソケットfdへの書き込みを
+    `_resolve_fd_path`がNoneを返すことで無検査にしていた(§CNと同じ
+    構造)ことを発見した。Sanctum起動前に接続済みの実ソケットへ、
+    起動後にos.write()で直接書き込む完全な実攻撃チェーンが遮断される
+    ことを、本テストが継続的に再検証する。"""
+    success, detail = skt._check_os_write_to_presealed_socket_is_blocked_end_to_end()
+    assert success is True, detail
+
+
+def test_check_os_write_inside_allowed_dirs_is_not_falsely_blocked_directly():
+    success, detail = skt._check_os_write_inside_allowed_dirs_is_not_falsely_blocked()
+    assert success is True, detail
+
+
+def test_check_os_write_without_sanctum_is_unaffected_directly():
+    success, detail = skt._check_os_write_without_sanctum_is_unaffected()
+    assert success is True, detail
+
+
+def test_battery_detects_reintroduced_os_write_socket_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CQ] `sefer/__init__.py`の
+    `_guarded_os_write`が(将来の変更で)再び`_check_fd_not_socket`を
+    呼ばなくなった場合、本天使が正しく「遮断されなかった」として検知
+    することを、実際にgit stashでこの退行を再現して確認済み(修正前は
+    本テストと同じ失敗を実機で確認し、修正後はPASSに戻ることを確認
+    した)。"""
+    def _vulnerable_check():
+        return False, "os.writeによるソケットfdへの書き込みが遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("sefer._guarded_os_write: ソケットfd宛書き込み遮断(§CQ・事前接続バイパス込み)", _vulnerable_check),
+        ("sefer._guarded_os_write: allowed_dirs内の誤検知防止(§CQ)", skt._check_os_write_inside_allowed_dirs_is_not_falsely_blocked),
+        ("sefer._guarded_os_write: Sanctum未使用時の誤検知防止(§CQ)", skt._check_os_write_without_sanctum_is_unaffected),
+    ]
+    monkeypatch.setattr(skt, "CHECKS", patched_checks)
+
+    failures = skt.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "sefer._guarded_os_write: ソケットfd宛書き込み遮断(§CQ・事前接続バイパス込み)"
