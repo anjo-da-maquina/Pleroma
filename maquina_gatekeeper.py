@@ -183,10 +183,30 @@ def _register_audit_hook_once():
         # イベント名を列挙する狭いallowlist方式であるのに対し、sefer側は
         # 名前空間ごとの広いdefault-deny方式を採用しているという、
         # 設計そのものの違いに起因する非対称性である)。
+        #
+        # [脆弱性修正 2026-10 §CM] forbidden集合は§CAで"socket.sendto"
+        # (UDPの接続不要送信)を追加していたが、同じ「接続不要でデータを
+        # 送信できる」別のAPIである`socket.sendmsg()`が発火する専用の
+        # audit event"socket.sendmsg"が、この列挙から漏れていたことを
+        # 実機で確認した(`set_sanctuary_sealed(True)`の状態でも
+        # `socket.sendmsg()`によるUDPデータ送信が例外無しで成立し、実際に
+        # OSレベルの送信まで到達することを確認済み)。§CAと全く同じ構造の
+        # 欠陥――禁止したい意図(接続不要でのデータ送信)は同じなのに、
+        # 別のAPI名を使うだけで素通りしてしまう――が、"sendto"を塞いだ
+        # 直後にその隣にある"sendmsg"には及んでいなかった。独立した別の
+        # 防御層である`sefer/__init__.py`の`_michael_absolute_defense`は、
+        # 個々のイベント名の列挙ではなく`"socket" in event`という名前空間
+        # ごとのデフォルト拒否を備えているため、"socket.sendmsg"も最初から
+        # 自動的に遮断されており、この欠陥の対象ではないことを実機で確認
+        # 済みである(§CEのctypes.dlsymと全く同じ、2つの独立した監査フック
+        # 間の非対称性)。しかし本ファイル(Gatekeeper)単独でも防御が成立
+        # することを保証するため、§CC同様、構造的に並行する別の層が
+        # たまたま塞いでいることに頼らず、本ファイル自身のforbidden集合
+        # にも明示的に追加する。
         forbidden = {
             "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
             "os.fork", "os.forkpty",
-            "socket.connect", "socket.sendto",
+            "socket.connect", "socket.sendto", "socket.sendmsg",
             "ctypes.dlopen", "ctypes.dlsym",
         }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):

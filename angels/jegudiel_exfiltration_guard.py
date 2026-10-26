@@ -85,9 +85,56 @@ def _check_udp_sendto_is_allowed_when_unsealed() -> tuple:
         s.close()
 
 
+def _check_udp_sendmsg_is_blocked_while_sealed() -> tuple:
+    """[新設 §CM] 封鎖中にUDPのsendmsg()が正しく遮断されるかを確認する。
+    sendto()と全く同じ「接続不要でデータを送信できる」経路だが、別の
+    audit event("socket.sendmsg")を発火するため、forbidden集合への
+    追加が別途必要だった(§CAのsendtoの修正では対象外のままだった)。
+    戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        try:
+            s.sendmsg([b"leak-data"], [], 0, ("93.184.216.34", 12345))
+            return False, "封鎖中にsocket.sendmsg()によるデータ送信が遮断されなかった"
+        except mg.LossOfAtaraxia:
+            return True, "OK"
+    finally:
+        mg.set_sanctuary_sealed(False)
+        s.close()
+
+
+def _check_udp_sendmsg_is_allowed_when_unsealed() -> tuple:
+    """[新設 §CM・誤検知防止] 封鎖していない通常時は、socket.sendmsg()が
+    誤って遮断されないかを確認する。戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    if mg.is_sanctuary_sealed():
+        return False, "前提条件の異常: 検査開始時点で既に封鎖状態になっている"
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        try:
+            s.sendmsg([b"hello"], [], 0, ("127.0.0.1", 1))
+        except OSError:
+            # [正直な注記] sendto版と同じ理由(ネットワーク到達性の制約)
+            # により、OSErrorは本検査の対象外として安全に無視する。
+            pass
+        except mg.LossOfAtaraxia:
+            return False, "封鎖していないのにsocket.sendmsg()が誤って遮断された"
+        return True, "OK"
+    finally:
+        s.close()
+
+
 CHECKS = [
     ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", _check_udp_sendto_is_blocked_while_sealed),
-    ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止", _check_udp_sendto_is_allowed_when_unsealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendto)", _check_udp_sendto_is_allowed_when_unsealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: UDP sendmsg遮断(§CM)", _check_udp_sendmsg_is_blocked_while_sealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendmsg, §CM)", _check_udp_sendmsg_is_allowed_when_unsealed),
 ]
 
 
@@ -121,8 +168,8 @@ def main():
 
     report_pass(
         NAME,
-        "封鎖中のUDP sendto()による接続不要のデータ送信が正しく遮断され、"
-        "かつ非封鎖時には誤って遮断されないことを確認しました。",
+        "封鎖中のUDP sendto()・sendmsg()による接続不要のデータ送信が正しく遮断され、"
+        "かつ非封鎖時にはいずれも誤って遮断されないことを確認しました。",
     )
 
 

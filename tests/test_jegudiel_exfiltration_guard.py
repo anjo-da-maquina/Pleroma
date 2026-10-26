@@ -46,6 +46,21 @@ def test_check_udp_sendto_is_allowed_when_unsealed_directly():
     assert success is True, detail
 
 
+def test_check_udp_sendmsg_is_blocked_while_sealed_directly():
+    """[新設 §CM] socket.sendmsg()はsendto()と同じ「接続不要の送信」
+    だが別のaudit event("socket.sendmsg")を発火するため、§CAの修正
+    (forbidden集合への"socket.sendto"追加)だけでは塞がれていなかった
+    経路。実際にforbidden集合へ"socket.sendmsg"を追加した修正の、
+    継続的な再検証を本テストが担う。"""
+    success, detail = jeg._check_udp_sendmsg_is_blocked_while_sealed()
+    assert success is True, detail
+
+
+def test_check_udp_sendmsg_is_allowed_when_unsealed_directly():
+    success, detail = jeg._check_udp_sendmsg_is_allowed_when_unsealed()
+    assert success is True, detail
+
+
 def test_battery_detects_reintroduced_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CA修正前の、"socket.connect"のみを
     遮断する素朴な実装に戻した場合、本天使が正しく「遮断されなかった」
@@ -62,6 +77,28 @@ def test_battery_detects_reintroduced_regression(monkeypatch):
     failures = jeg.run_battery()
     assert len(failures) == 1
     assert failures[0][0] == "maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断"
+
+
+def test_battery_detects_sendmsg_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CM] maquina_gatekeeper.pyの
+    forbidden集合から"socket.sendmsg"だけが(将来の変更で)再び脱落した
+    場合、本天使が正しく「遮断されなかった」として検知することを、
+    実際にgit stashでこの退行を再現して確認済み(修正前は本テストと
+    同じ失敗を実機で確認し、修正後はPASSに戻ることを確認した)。"""
+    def _vulnerable_check():
+        return False, "封鎖中にsocket.sendmsg()によるデータ送信が遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", jeg._check_udp_sendto_is_blocked_while_sealed),
+        ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendto)", jeg._check_udp_sendto_is_allowed_when_unsealed),
+        ("maquina_gatekeeper.ultimate_audit_hook: UDP sendmsg遮断(§CM)", _vulnerable_check),
+        ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendmsg, §CM)", jeg._check_udp_sendmsg_is_allowed_when_unsealed),
+    ]
+    monkeypatch.setattr(jeg, "CHECKS", patched_checks)
+
+    failures = jeg.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "maquina_gatekeeper.ultimate_audit_hook: UDP sendmsg遮断(§CM)"
 
 
 def test_checker_exception_is_reported_as_a_failure(monkeypatch):

@@ -1655,3 +1655,22 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: libseccompの`seccomp_syscall_resolve_name`で、3件すべてが実際にこの実機のx86_64カーネルで解決可能であることを確認した。`angels/dominions_syscall_guard.py`を直接実行し、新設した3件の生カーネル検証(それぞれ実際にEPERMで拒否されることを確認)がPASSすることを確認した。リポジトリ全体のpytestを再実行し、429 passed(新設した回帰テストを含む)・既知の無関係な2件のみが残ることを確認した。
 
 **正直な注記**: この「Dockerの既定プロファイルとの体系的な比較」自体も、公式ドキュメントのページ内容(Web検索経由で取得)に基づくものであり、本プロジェクトが過去に何度も発見してきたパターン(「1つ見つけたら、同じ構造の他の抜け穴が無いか、もう一歩深く確認する」)の実践である。Docker・containerdの既定プロファイルは将来も更新され続ける可能性があるため、本件は「現時点で確認できた範囲での一致」であり、将来再度の照合が必要になりうることをBOUNDARY.mdの一般化の精神に沿って記録する。
+
+
+### §CM: `maquina_gatekeeper.py`の深層保護が、`socket.sendto()`は§CAで塞いだが、全く同じ「接続不要でデータを送信できる」別のAPIである`socket.sendmsg()`には及んでいなかった
+
+**発見**: §CL完了後、継続的な見直しの一環として、本リポジトリで繰り返し発見してきたパターン(「ある具体的な迂回経路を1つ塞いだら、同じ構造を持つ他のAPIにも同じ穴がないか、もう一歩深く確認する」、§CL自身がDockerの既定プロファイルとの体系的比較で実践したのと同じ方法論)を、§CAで修正した`socket.sendto`に対しても適用した。Python標準ライブラリの`socket`モジュールが発火する audit event を実際に`sys.addaudithook`で捕捉して調べたところ、`socket.sendmsg()`が`"socket.sendmsg"`という、`"socket.sendto"`とは別個の専用audit eventを発火することを確認した。`maquina_gatekeeper.py`の`ultimate_audit_hook`のforbidden集合には`"socket.sendto"`はあったが`"socket.sendmsg"`は無く、実際に`set_sanctuary_sealed(True)`(深層保護が有効な状態)で`socket.sendmsg()`によるUDPデータ送信を試みたところ、例外無しで素通りし、実際にOSレベルの送信まで到達することを実機で確認した。
+
+**たとえ話**: §CAは「正面玄関(connect)を使わず裏口(sendto)から出て行かれる」ことを発見して裏口にも錠をかけた。本件は、その裏口のすぐ隣に、同じ塀を通り抜けられる別の勝手口(sendmsg)があったのに、裏口にだけ気を取られて勝手口の存在そのものに気づいていなかった、という話である。
+
+**原因**: §CAの修正時、「UDPは`connect()`を経由せずデータを送信できる」という発見を起点に`socket.sendto`という具体的なAPI名だけを塞いだが、「接続不要でデータを送信できるPython標準ライブラリのAPIは`sendto`以外にも存在するか」という、より一段上の視点での網羅的な確認を行っていなかった。これは§CLで発見した「Dockerの既定プロファイルとの体系的な比較を怠っていた」のと全く同じ種類の見落とし(個別の具体例への対応で止まり、その具体例が属するカテゴリ全体への網羅的確認に進んでいなかった)である。
+
+**対応**: `maquina_gatekeeper.py`の`ultimate_audit_hook`のforbidden集合に`"socket.sendmsg"`を追加した。`angels/jegudiel_exfiltration_guard.py`(§CAで新設した、この種の迂回を継続的に再検証する天使)に、`socket.sendmsg()`版の遮断検証(`_check_udp_sendmsg_is_blocked_while_sealed`)・誤検知防止検証(`_check_udp_sendmsg_is_allowed_when_unsealed`)を追加し、既存のsendto版と並行して常時実行されるようにした。
+
+**正直な設計方針の開示**: 独立した別の防御層である`sefer/__init__.py`の`_michael_absolute_defense`は、個々のイベント名の列挙ではなく`"socket" in event`という名前空間ごとの広いチェックを備えているため、実機で確認したところ`"socket.sendmsg"`も最初から自動的に遮断されており、この欠陥の対象ではなかった(§CEのctypes.dlsymと全く同じ、2つの独立した監査フック間の非対称性――狭いallowlist方式のGatekeeperと、広いdefault-deny方式のSeferという設計そのものの違いに起因する)。しかし、§CC・§CEと同じ方針により、構造的に並行する別の層がたまたま塞いでいることに依存せず、本ファイル(Gatekeeper)単独でも防御が成立することを保証するため、本ファイル自身のforbidden集合にも明示的に追加した。BOUNDARY.mdの「Python層の防御はあくまでPythonのAPI呼び出しを監視するものである」という記述自体には変更はない――本件はPython層の中での網羅性の問題であり、カーネルレベルの迂回(ctypes経由の直接syscall)とは別種の欠陥である。
+
+**一般化**: 「1つの具体的な迂回経路を見つけたら、同じ構造を持つ他のAPI・同じカテゴリの他の項目にも同じ穴がないかを、体系的に確認する」という方法論を、§CL(Dockerの既定プロファイルとの比較)・本件(socket audit eventの網羅的確認)の2件で連続して実践した。この方法論自体を、本リポジトリの今後の見直し全般に適用する一般的な教訓として記録する。
+
+**実装中の自己レッドチーム**: `git stash`で`maquina_gatekeeper.py`の修正のみを一時的に取り消し(`socket.sendmsg`を含まない§CA時点のforbidden集合に戻し)、`angels/jegudiel_exfiltration_guard.py`を実行したところ、新設した`UDP sendmsg遮断(§CM)`の検査が正しく「封鎖中にsocket.sendmsg()によるデータ送信が遮断されなかった」としてFAILすることを確認した。`git stash pop`で修正を復元したところ、同じ検査がPASSに戻ることを確認した。`tests/test_jegudiel_exfiltration_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_sendmsg_regression`)を追加した。
+
+**検証**: `sys.addaudithook`で実際にイベント名を捕捉し、`socket.sendmsg()`が`"socket.sendmsg"`という専用eventを発火すること、その引数の形状(`(socket_obj, address_tuple)`)を実機で確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、修正後は4件の検査(sendto遮断・sendto非封鎖時・sendmsg遮断・sendmsg非封鎖時)すべてがPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`の全9件(新設4件を含む)がPASSすることを確認した。リポジトリ全体のpytestを再実行し、432 passed(新設分を含む)・既知の無関係な2件のみが残ることを確認した。
