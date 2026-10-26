@@ -535,13 +535,44 @@ jobs:
         if: success()
         run: python angels/dominions_syscall_guard.py
 
-      - name: 22.885. [一時的な自己レッドチーム・§CK実機検証用・後続commitで削除予定] 新設した22.89を実際に発火させるための意図的な失敗
+      - name: 22.885. [一時的な自己レッドチーム・§CK実機検証用・確認後に削除予定] incident-log-visibilityジョブを実際に発火させるための意図的な失敗
         if: success()
         run: |
-          echo "[§CK自己レッドチーム] この一時的なステップは、22.89の失敗時ログ投稿が実際にGitHub Actions上で機能することを実機で確認するためだけに存在し、確認後の次のcommitで削除する。"
+          echo "[§CK自己レッドチーム・2回目] この一時的なステップは、別ジョブへ分離したincident-log-visibilityが実際にGitHub Actions上で機能することを実機で確認するためだけに存在し、確認後の次のcommitで削除する。"
           exit 1
 
-      - name: 22.89. 失敗時の詳細をコミットコメントとして可視化 (§CK・anjo_da_maquina_protocol.ymlにもログblobホスト到達不能対策を追加)
+      - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
+        if: failure() || cancelled()
+        run: python angels/gehenna_void_entropy.py
+      - name: 22.9. アズラエルの大鎌 (Azrael - スマートコントラクト消滅)
+        if: failure() || cancelled()
+        run: python angels/azrael_scythe_slashing.py
+      - name: 23.0. 黙示録の七つのラッパ (Seven Trumpets - 不正事案の恒久的公開)
+        if: failure() || cancelled()
+        run: python angels/seven_trumpets_ledger.py
+
+      - name: 23.5. 最後の審判 (Dies Irae - 連座制キルスイッチ)
+        if: failure() || cancelled()
+        run: python angels/dies_irae.py
+      - name: 24. 静寂の王座 (Throne of Ataraxia - 完全初期化の浄化)
+        if: always()
+        run: python angels/ataraxia_throne.py
+
+  incident-log-visibility:
+    name: 失敗時の詳細をコミットコメントとして可視化 (§CK・anjo_da_maquina_protocol.ymlにもログblobホスト到達不能対策を追加)
+    needs: angelic-audit
+    if: failure()
+    runs-on: ubuntu-22.04
+    # [新設・2026-10 §CK] 失敗時にangelic-auditジョブ自身のログを取得し
+    # (`actions: read`)、その内容をコミットコメントとして投稿する
+    # (`contents: write`)ために、デフォルトのリポジトリ設定に依存せず
+    # 本ワークフロー自身で明示的に宣言する(`sanctuary_ci.yml`の§BQと
+    # 同じ方針)。
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: angelic-auditジョブ自身のログを取得し、コミットコメントとして投稿
         # [新設 2026-10 §CK] §BQで`sanctuary_ci.yml`に実装した「失敗時の
         # pytest出力をコミットコメントとして投稿する」仕組みが、この
         # ワークフロー(`anjo_da_maquina_protocol.yml`)には一度も存在して
@@ -554,17 +585,31 @@ jobs:
         # 本件で対応する。
         #
         # §BQの仕組みは単一の`pytest`実行の出力だけを対象にしていたが、
-        # 本ジョブは80以上の個別ステップから成るため、「どのステップの
-        # どの出力が失敗の核心か」を、ジョブ全体のログから自動で切り出す
-        # 必要がある。そこで、GitHub Actionsのジョブログ取得API
-        # (`GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs`)を、
-        # このワークフロー自身の実行環境(GitHub Actionsのランナー自体)
-        # から呼び出す。このAPIは実体としてはログblobストレージへの
-        # リダイレクトだが、これを呼ぶのはこのサンドボックス(制限された
-        # プロキシ経由)ではなく、GitHub Actionsのランナー自身(通常の
-        # インターネット到達性を持つ)であるため、§BQ・§CH・§CJで
-        # 繰り返し遭遇した到達不能の制約を受けない。
-        if: failure()
+        # `angelic-audit`ジョブは80以上の個別ステップから成るため、
+        # 「どのステップのどの出力が失敗の核心か」を、ジョブ全体のログ
+        # から自動で切り出す必要がある。そこで、GitHub Actionsのジョブ
+        # ログ取得API(`GET /repos/{owner}/{repo}/actions/jobs/{job_id}
+        # /logs`)を、このワークフロー自身の実行環境(GitHub Actionsの
+        # ランナー自体)から呼び出す。このAPIは実体としてはログblob
+        # ストレージへのリダイレクトだが、これを呼ぶのはこのサンド
+        # ボックス(制限されたプロキシ経由)ではなく、GitHub Actionsの
+        # ランナー自身(通常のインターネット到達性を持つ)であるため、
+        # §BQ・§CH・§CJで繰り返し遭遇した到達不能の制約を受けない。
+        #
+        # [実装中に自分で発見・即時訂正した誤り(正直な自己開示)] 当初、
+        # この処理を`angelic-audit`ジョブ自身の最終ステップとして実装
+        # し、実際に意図的な失敗を注入して実機で検証したところ、
+        # 「ジョブログの取得自体に失敗しました」というエラーで本処理
+        # そのものが機能していないことを実機で発見した。原因は、実行中
+        # (未完了)の自分自身のジョブに対して、GitHub Actionsのジョブ
+        # ログ取得APIを呼び出していたことだった――このAPIは、ジョブが
+        # 完全に終了してログが確定した後でなければ、完全なログを返せ
+        # ない(自分自身が走っている最中に、自分自身の確定したログを
+        # 取得することはできない、という論理的に当然の制約である)。
+        # そのため、本処理を`angelic-audit`に`needs:`で依存する別個の
+        # ジョブへ分離した。このジョブが開始される時点で`angelic-audit`
+        # ジョブは既に完全に終了しており、そのログはAPIから正しく取得
+        # できる。
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -572,7 +617,7 @@ jobs:
           JOB_ID=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs" \
             --jq '.jobs[] | select(.name=="聖なる統合監査 (Angelic Zero-Trust Audit)") | .id' | head -n1)
           if [ -z "$JOB_ID" ]; then
-            echo "[警告] 自分自身のjob_idを特定できませんでした。" > /tmp/anjo_job_log.txt
+            echo "[警告] angelic-auditのjob_idを特定できませんでした。" > /tmp/anjo_job_log.txt
           else
             gh api "repos/${{ github.repository }}/actions/jobs/${JOB_ID}/logs" > /tmp/anjo_job_log.txt \
               || echo "[警告] ジョブログの取得自体に失敗しました(job_id=${JOB_ID})。" > /tmp/anjo_job_log.txt
@@ -591,20 +636,3 @@ jobs:
           } > /tmp/anjo_job_comment_body.md
           gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/comments" \
             -F body=@/tmp/anjo_job_comment_body.md
-
-      - name: 22.8. ゲヘナの虚無 (Gehenna - 観測者へのエントロピー返還)
-        if: failure() || cancelled()
-        run: python angels/gehenna_void_entropy.py
-      - name: 22.9. アズラエルの大鎌 (Azrael - スマートコントラクト消滅)
-        if: failure() || cancelled()
-        run: python angels/azrael_scythe_slashing.py
-      - name: 23.0. 黙示録の七つのラッパ (Seven Trumpets - 不正事案の恒久的公開)
-        if: failure() || cancelled()
-        run: python angels/seven_trumpets_ledger.py
-
-      - name: 23.5. 最後の審判 (Dies Irae - 連座制キルスイッチ)
-        if: failure() || cancelled()
-        run: python angels/dies_irae.py
-      - name: 24. 静寂の王座 (Throne of Ataraxia - 完全初期化の浄化)
-        if: always()
-        run: python angels/ataraxia_throne.py
