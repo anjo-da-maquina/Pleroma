@@ -61,6 +61,42 @@ def test_check_udp_sendmsg_is_allowed_when_unsealed_directly():
     assert success is True, detail
 
 
+def test_check_getaddrinfo_is_blocked_while_sealed_directly():
+    """[新設 §CT] 封鎖中にsocket.getaddrinfo()によるDNS名前解決
+    (機密データをサブドメインラベルに符号化し、connect()を一切経由
+    せずに外部のDNSサーバーへ送出する「DNS exfiltration」経路)が
+    正しく遮断されることを、継続的に再検証する。"""
+    success, detail = jeg._check_getaddrinfo_is_blocked_while_sealed()
+    assert success is True, detail
+
+
+def test_check_getaddrinfo_is_allowed_when_unsealed_directly():
+    success, detail = jeg._check_getaddrinfo_is_allowed_when_unsealed()
+    assert success is True, detail
+
+
+def test_battery_detects_getaddrinfo_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CT] maquina_gatekeeper.pyの
+    forbidden集合から"socket.getaddrinfo"を(将来の変更で)取り除いた場合、
+    本天使が正しく「遮断されなかった」として検知することを、実際に
+    forbidden集合からこのエントリを一時的に取り除いて再現して確認済み
+    (取り除いた状態では本テストと同じ失敗を実機で確認し、復元すると
+    PASSに戻ることを確認した)。"""
+    def _vulnerable_check():
+        return False, "封鎖中にsocket.getaddrinfo()によるDNS名前解決が遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", jeg._check_udp_sendto_is_blocked_while_sealed),
+        ("maquina_gatekeeper.ultimate_audit_hook: DNS名前解決遮断(§CT)", _vulnerable_check),
+        ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(getaddrinfo, §CT)", jeg._check_getaddrinfo_is_allowed_when_unsealed),
+    ]
+    monkeypatch.setattr(jeg, "CHECKS", patched_checks)
+
+    failures = jeg.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "maquina_gatekeeper.ultimate_audit_hook: DNS名前解決遮断(§CT)"
+
+
 def test_battery_detects_reintroduced_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CA修正前の、"socket.connect"のみを
     遮断する素朴な実装に戻した場合、本天使が正しく「遮断されなかった」
