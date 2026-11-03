@@ -1799,3 +1799,15 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: 実際のTLSループバック接続(自己署名証明書)・実際の機密文字列を用いた完全な実攻撃チェーン(Sanctum起動前のTLS接続確立→起動後のssl.SSLSocket.write()攻撃→遮断確認→受信側に実際にデータが届いていないことまでの確認)を実機で再現し、修正後は遮断され、かつデータが一切届いていないことを確認した。Sanctum起動後の許可ホストへの新規TLS接続でのwrite()、およびSanctum未使用時の正当なwrite()が、いずれも修正後も正しく成功することを確認した。`angels/hadraniel_socket_send_guard.py`を直接実行し、新設した3件を含む全10件がPASSすることを確認した。`tests/test_hadraniel_socket_send_guard.py`の該当テストを、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。本件の修正を含むpushの最終的なpytest全件実行の確認は、§CN・§CO・§CP・§CQと同じ理由(このサンドボックス環境がpypi.orgへ到達できずpipが使えない)により、real CIに委ねる。
 
 **real CIでの最終検証**: `94b9e17`のpush後、両ワークフロー(`Sanctuary CI/CD`・`Anjo da máquina Protocol - Angels`)を具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。`Sanctuary CI/CD`は今回いつもより時間がかかったが(`Anjo da máquina Protocol - Angels`は先に`success`で完了)、ハングではなく単に時間がかかっているだけであることをステータスのポーリングで確認しながら待ち、最終的に正常完了した。§CP・§CQと同様、事前のjerahmeel・CI配線チェックの機械的な再確認により、§CN・§COで繰り返した自己混入レグレッションは本件でも再発しなかった。
+
+### §CS: §CC`angels/zerachiel_process_spawn_guard.py`が正直に残していた「os.forkpty()は直接検証していない」という課題を、実際に検証して解消
+
+**背景**: §CCで`maquina_gatekeeper.py`の`forbidden`集合に`os.fork()`による深層保護迂回への対策として`"os.fork"`・`"os.forkpty"`の両方のaudit eventを追加したが、`angels/zerachiel_process_spawn_guard.py`の継続的な回帰検知は、CI環境での子プロセス管理の複雑さを避ける目的で`os.fork()`のみを直接実行して確認し、`os.forkpty()`については「同じ修正でカバーされているはずだが、直接の実行確認は含めていない」と、コード中のコメントに正直な未検証事項として明記していた。
+
+**本件での対応**: この「はずだが未確認」という状態を、実際に検証した。このサンドボックス環境は`maquina_gatekeeper.py`が依存する`rsa`パッケージをpypi.orgから取得できない(既知の環境制約)ため、実際の署名検証ロジックには一切触れない最小限のダミー`rsa`スタブ(呼び出されたら`NotImplementedError`を発生させるのみ)を一時的に`PYTHONPATH`に追加し、`maquina_gatekeeper`モジュール自体のimportを通した上で、`os.forkpty()`を封鎖中・非封鎖時の両方で直接実行した。結果、`os.fork()`と全く同じ経路で正しく遮断・正しく許可されることを確認した。これは新しい欠陥の発見ではなく、以前から正直に「未検証」と記していた前提が、検証した結果その通りだったことの確認である。
+
+`angels/zerachiel_process_spawn_guard.py`に`_check_forkpty_is_blocked_while_sealed`・`_check_forkpty_is_allowed_when_unsealed`の2検査関数を追加し、`CHECKS`に登録した(`os.fork()`版と同じ、即時`os._exit(0)`・事前flushの手法を用いることで、CI環境での不安定化リスクが実際には生じないことも確認済み)。コード中の「正直な注記」も、課題が残っていた旨から、実際に検証して解消した旨に更新した。
+
+**自己レッドチーム**: `maquina_gatekeeper.py`の`forbidden`集合から`"os.forkpty"`を一時的に取り除き(`git diff`で変更箇所が1行のみであることを確認した上で)、新設した`os.forkpty`遮断検査だけが正しく「封鎖中にos.forkpty()によるプロセス生成が遮断されなかった」としてFAILすることを確認し、元に戻すと(`git diff --stat`で差分が完全に消えたことまで確認した上で)全4件がPASSに戻ることを確認した。`tests/test_zerachiel_process_spawn_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_reintroduced_forkpty_regression`)を追加した。
+
+**検証**: `angels/zerachiel_process_spawn_guard.py`を直接実行し(前述のrsaスタブを用いて)、新設した2件を含む全4件がPASSすることを確認した。`tests/test_zerachiel_process_spawn_guard.py`の全7件を、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件はコードの修正を伴う変更(新しい検査関数2件の追加)のため、他の§同様、最終的なpytest全件実行の確認はreal CIに委ねる。本件の修正に用いた`rsa`スタブはこのセッションの一時ファイル(`/tmp`配下)のみに存在し、リポジトリには一切コミットしていない。
