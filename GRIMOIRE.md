@@ -1838,3 +1838,15 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: 実際にDNSクエリを発行しようとする完全な実攻撃チェーン(Sanctum/深層保護起動前ではなく、起動**中**に、機密データを符号化したホスト名でgetaddrinfo呼び出し→遮断確認)を両方の防御層それぞれで実機再現し、いずれも正しく遮断されることを確認した。許可ホストへの正当な解決、バインド用の`None`解決、Sanctum/深層保護未使用時の正当な解決が、いずれも修正後も正しく成功することを確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、新設した4件を含む全8件がPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`・`tests/test_armageddon_core.py`の該当テストを、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。本件の修正に用いた`rsa`スタブ(§CSで作成したものを再利用)はこのセッションの一時ファイルのみに存在し、リポジトリには一切コミットしていない。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由により、real CIに委ねる。
 
 **real CIでの最終検証**: `f02955d`のpush後、両ワークフロー(`Sanctuary CI/CD`・`Anjo da máquina Protocol - Angels`)を具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。§CS同様、事前のjerahmeel・CI配線チェックの機械的な再確認により、自己混入レグレッションは本件でも発生しなかった(一発でクリーンに通過)。
+
+### §CU: `maquina_gatekeeper.py`の「深層保護」が、§CTで塞いだ`getaddrinfo`以外の旧API(`gethostbyname`・`gethostbyaddr`・`getnameinfo`)経由のDNS exfiltrationには及んでいなかった
+
+**発見**: §CTの修正直後、「DNS名前解決APIは`getaddrinfo`だけか」を実機で棚卸しした。CPythonには`getaddrinfo`より古い、互換目的の名前解決API――`socket.gethostbyname()`/`socket.gethostbyname_ex()`(いずれも単一の audit event "socket.gethostbyname" を発火)・`socket.gethostbyaddr()`("socket.gethostbyaddr"、逆引き)・`socket.getnameinfo()`("socket.getnameinfo")――が存在する。これらも`getaddrinfo`と同じ「DNS exfiltration」経路になり得るが、`maquina_gatekeeper.py`の`forbidden`集合(列挙方式)には一度も含まれていなかったことを発見した。
+
+実機で、`set_sanctuary_sealed(True)`の状態でも`socket.gethostbyname()`が例外無しに成立し、このサンドボックス自身のDNS到達性の欠如によるOSErrorでのみ失敗すること(=本フックが何も遮断していないこと)を確認した。一方、独立した別の防御層`sefer/__init__.py`の`_michael_absolute_defense`は、個々のイベント名を列挙するのではなく、引数からホスト名/アドレスを抽出する汎用ロジック(「2. ソケット通信検査」)を既に備えていたため、これらは§CTより前から自動的に保護されていたことを実機で確認した――§CM(sendmsg)と全く同じ、「列挙方式の層だけが取り残され、namespace方式の層は最初から保護していた」という非対称性である。
+
+**対応**: `maquina_gatekeeper.py`の`forbidden`集合に"socket.gethostbyname"・"socket.gethostbyaddr"・"socket.getnameinfo"を追加した。`angels/jegudiel_exfiltration_guard.py`に、これら4関数を一括検証する遮断確認・誤検知防止確認の2検査を追加した(gethostbyname/gethostbyname_exは同じイベント名を発火するため、1つの検査関数内で両方確認)。
+
+**実装中の自己レッドチーム**: `forbidden`集合から新設した3エントリを一時的に取り除き、`angels/jegudiel_exfiltration_guard.py`を直接実行したところ、新設した検査だけが正しく「socket.gethostbynameが遮断されず、実際のOS解決処理まで進んでしまった」としてFAILし(他の9件は影響を受けずPASSを維持)、復元すると(`git diff --stat`で差分が正しく戻ったことを確認した上で)全10件がPASSに戻ることを確認した。`tests/test_jegudiel_exfiltration_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_legacy_dns_lookup_regression`)を追加した。
+
+**検証**: 封鎖中のgethostbyname/gethostbyname_ex/gethostbyaddr/getnameinfoの4関数それぞれについて、実際に遮断されることを実機で確認した。非封鎖時・127.0.0.1等の数値アドレスに対する正当な呼び出しが、いずれも誤って遮断されないことも確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、新設した2件を含む全10件がPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`の該当テストを自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由により、real CIに委ねる。

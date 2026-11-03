@@ -48,6 +48,16 @@ NAME = "イェグディエルの封印網 (Jegudiel's Sealed Net - 深層保護�
 # `_michael_absolute_defense`も、同じ理由で"socket.getaddrinfo"を
 # `ALWAYS_PASSTHROUGH_AUDIT_EVENTS`から除外し、専用のallowed_hosts検査
 # を新設する同種の修正を別途行った(GRIMOIRE.md §CT参照)。
+#
+# [新設 2026-11 §CU] §CTの直後、「DNS名前解決APIはgetaddrinfoだけか」を
+# 実機で棚卸ししたところ、`socket.gethostbyname()`/`gethostbyname_ex()`
+# ("socket.gethostbyname")・`gethostbyaddr()`("socket.gethostbyaddr")・
+# `getnameinfo()`("socket.getnameinfo")も同じDNS exfiltration経路に
+# なり得るが、本ファイルの`forbidden`集合に一度も含まれていなかった
+# ことを発見した。独立した別の防御層`sefer/__init__.py`の
+# `_michael_absolute_defense`は、引数からホスト名/アドレスを抽出する
+# 汎用ロジックを既に備えていたため、これらは§CTより前から自動的に
+# 保護されていた(本件はmaquina_gatekeeper側のみの欠陥)。
 
 sys.path.insert(0, str(ROOT))
 
@@ -245,6 +255,64 @@ def _check_sefer_sanctum_allows_approved_host_getaddrinfo() -> tuple:
         return False, f"予期しない例外: {type(e).__name__}: {e}"
 
 
+def _check_legacy_dns_lookups_are_blocked_while_sealed() -> tuple:
+    """[新設 §CU] 封鎖中にgethostbyname/gethostbyname_ex/gethostbyaddr/
+    getnameinfoによるDNS関連の名前解決・逆引きが正しく遮断されるかを
+    確認する。戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    try:
+        calls = [
+            ("socket.gethostbyname", lambda: socket.gethostbyname("leak-via-dns-exfil.example.invalid")),
+            ("socket.gethostbyname_ex", lambda: socket.gethostbyname_ex("leak-via-dns-exfil.example.invalid")),
+            ("socket.gethostbyaddr", lambda: socket.gethostbyaddr("93.184.216.34")),
+            ("socket.getnameinfo", lambda: socket.getnameinfo(("93.184.216.34", 80), 0)),
+        ]
+        for label, call in calls:
+            try:
+                call()
+                return False, f"封鎖中に{label}が遮断されなかった"
+            except mg.LossOfAtaraxia:
+                continue
+            except OSError as e:
+                # [正直な注記] getaddrinfo版(§CT)と同じ理由により、ここに
+                # 到達すること自体が「遮断されず実際のOS解決処理まで
+                # 進んでしまった」ことの証拠であり、安全側に倒して失敗
+                # として報告する。
+                return False, f"{label}が遮断されず、実際のOS解決処理まで進んでしまった(OSError: {e})"
+        return True, "OK"
+    finally:
+        mg.set_sanctuary_sealed(False)
+
+
+def _check_legacy_dns_lookups_are_allowed_when_unsealed() -> tuple:
+    """[新設 §CU・誤検知防止] 封鎖していない通常時は、これらの関数が
+    誤って遮断されないかを確認する。戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    if mg.is_sanctuary_sealed():
+        return False, "前提条件の異常: 検査開始時点で既に封鎖状態になっている"
+    calls = [
+        ("socket.gethostbyname", lambda: socket.gethostbyname("127.0.0.1")),
+        ("socket.gethostbyaddr", lambda: socket.gethostbyaddr("127.0.0.1")),
+        ("socket.getnameinfo", lambda: socket.getnameinfo(("127.0.0.1", 80), socket.NI_NUMERICHOST | socket.NI_NUMERICSERV)),
+    ]
+    for label, call in calls:
+        try:
+            call()
+        except OSError:
+            # [正直な注記] ネットワーク・DNS到達性の制約によるOSErrorは、
+            # 本検査が確認したい「深層保護による誤遮断の有無」とは無関係
+            # なため、安全に無視する。
+            pass
+        except mg.LossOfAtaraxia as e:
+            return False, f"封鎖していないのに{label}が誤って遮断された: {e}"
+    return True, "OK"
+
+
 CHECKS = [
     ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", _check_udp_sendto_is_blocked_while_sealed),
     ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendto)", _check_udp_sendto_is_allowed_when_unsealed),
@@ -254,6 +322,8 @@ CHECKS = [
     ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(getaddrinfo, §CT)", _check_getaddrinfo_is_allowed_when_unsealed),
     ("sefer.Sanctum: DNS名前解決の許可ホスト検査(§CT)", _check_sefer_sanctum_blocks_unapproved_getaddrinfo),
     ("sefer.Sanctum: 許可ホスト・バインド用解決の誤検知防止(§CT)", _check_sefer_sanctum_allows_approved_host_getaddrinfo),
+    ("maquina_gatekeeper.ultimate_audit_hook: 旧API DNS関連遮断(gethostbyname等, §CU)", _check_legacy_dns_lookups_are_blocked_while_sealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(旧API DNS関連, §CU)", _check_legacy_dns_lookups_are_allowed_when_unsealed),
 ]
 
 
@@ -299,10 +369,11 @@ def main():
     report_pass(
         NAME,
         "封鎖中のUDP sendto()・sendmsg()による接続不要のデータ送信、"
-        "およびgetaddrinfo()によるDNS名前解決(§CT、maquina_gatekeeper・"
-        "sefer.Sanctumの両方の独立した防御層)がいずれも正しく遮断され、"
-        "かつ非封鎖時・許可ホスト・バインド用解決はいずれも誤って"
-        "遮断されないことを確認しました。",
+        "getaddrinfo()によるDNS名前解決(§CT、maquina_gatekeeper・"
+        "sefer.Sanctumの両方の独立した防御層)、およびgethostbyname/"
+        "gethostbyaddr/getnameinfo等の旧API経由のDNS関連呼び出し(§CU)が"
+        "いずれも正しく遮断され、かつ非封鎖時・許可ホスト・バインド用"
+        "解決はいずれも誤って遮断されないことを確認しました。",
     )
 
 
