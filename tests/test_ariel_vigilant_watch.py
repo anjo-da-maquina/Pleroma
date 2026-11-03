@@ -117,6 +117,147 @@ def test_known_limitation_dynamic_condition_is_not_evaluated():
     assert avw.find_disabled_steps(text) == []
 
 
+def test_detects_continue_on_error_with_no_downstream_outcome_check():
+    """[核心・新設 2026-11] `continue-on-error: true`が設定されている
+    のに、同じジョブ内のどの後続ステップもそのoutcome/conclusionを
+    一度も参照していない場合、失敗が黙って握り潰されたまま伝播しない
+    (=ジョブ全体が誤ってgreenになり得る)ことを検知する。
+    `.github/workflows/sanctuary_ci.yml`の§BQ修正(outcome enforcement
+    の追加)を、実際にその行を取り除いて再現し、本検査が正しくこの
+    状態を検知することを確認済み。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: Execute Sanctuary Verification\n"
+        "        id: sanctuary_verify\n"
+        "        continue-on-error: true\n"
+        "        run: pytest tests/\n"
+        "      - name: unrelated next step\n"
+        "        run: echo done\n"
+    )
+    result = avw.find_unchecked_continue_on_error_steps(text)
+    assert len(result) == 1
+    assert result[0][0] == "j"
+    assert result[0][1] == "Execute Sanctuary Verification"
+
+
+def test_does_not_flag_continue_on_error_whose_outcome_is_checked():
+    """`continue-on-error: true`のステップでも、後続ステップが
+    `steps.<id>.outcome`を実際に参照していれば誤検知しない(§BQの
+    修正後の正しい状態そのもの)。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: Execute Sanctuary Verification\n"
+        "        id: sanctuary_verify\n"
+        "        continue-on-error: true\n"
+        "        run: pytest tests/\n"
+        "      - name: enforce\n"
+        "        if: steps.sanctuary_verify.outcome == 'failure'\n"
+        "        run: exit 1\n"
+    )
+    assert avw.find_unchecked_continue_on_error_steps(text) == []
+
+
+def test_does_not_flag_continue_on_error_checked_via_conclusion():
+    """`.outcome`ではなく`.conclusion`を参照する形でも、同様に正しく
+    「参照されている」と判定する。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: step-a\n"
+        "        id: step_a\n"
+        "        continue-on-error: true\n"
+        "        run: pytest tests/\n"
+        "      - name: enforce\n"
+        "        run: |\n"
+        "          if [ \"${{ steps.step_a.conclusion }}\" = \"failure\" ]; then exit 1; fi\n"
+    )
+    assert avw.find_unchecked_continue_on_error_steps(text) == []
+
+
+def test_detects_continue_on_error_step_with_no_id_at_all():
+    """`continue-on-error: true`だがidすら設定されていない場合、他の
+    どのステップも原理的にそのoutcomeを参照できないため、より明確な
+    理由付きで検知する。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: no-id-step\n"
+        "        continue-on-error: true\n"
+        "        run: pytest tests/\n"
+    )
+    result = avw.find_unchecked_continue_on_error_steps(text)
+    assert len(result) == 1
+    assert "id" in result[0][2]
+
+
+def test_does_not_flag_steps_without_continue_on_error():
+    """`continue-on-error`が設定されていない通常のステップは、この検査
+    の対象にならない(誤検知しない)。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: normal\n"
+        "        id: normal_step\n"
+        "        run: pytest tests/\n"
+    )
+    assert avw.find_unchecked_continue_on_error_steps(text) == []
+
+
+def test_continue_on_error_false_is_not_flagged():
+    """`continue-on-error: false`(明示的に無効)は検知対象にしない。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: normal\n"
+        "        id: normal_step\n"
+        "        continue-on-error: false\n"
+        "        run: pytest tests/\n"
+    )
+    assert avw.find_unchecked_continue_on_error_steps(text) == []
+
+
+def test_battery_detects_reintroduced_sanctuary_ci_regression(monkeypatch):
+    """[自己レッドチームの固定] `.github/workflows/sanctuary_ci.yml`から
+    outcome enforcementの行を実際に取り除いて再現し(§BQ規模の退行)、
+    本天使のmain()が正しくFAILすることを実機で確認した(git diff --stat
+    で変更ファイルを正確に元へ復元したことも確認済み)。ここではmain()
+    そのものを、一時ディレクトリ上の最小再現ワークフローに対して実行する
+    形で、同じ退行を継続的に固定する。"""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        wf_dir = Path(td) / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "sabotaged.yml").write_text(
+            "jobs:\n"
+            "  verify_ataraxia:\n"
+            "    steps:\n"
+            "      - name: Execute Sanctuary Verification\n"
+            "        id: sanctuary_verify\n"
+            "        continue-on-error: true\n"
+            "        run: pytest tests/\n"
+            "      - name: 失敗時の詳細をコミットコメントとして可視化\n"
+            "        run: echo no-outcome-check-here\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(avw, "ROOT", Path(td))
+        monkeypatch.setattr(avw, "TARGET_WORKFLOW_DIR", wf_dir)
+        try:
+            avw.main()
+            assert False, "FAILするはずのmain()がsys.exit(1)しなかった"
+        except SystemExit as e:
+            assert e.code == 1
+
+
 def test_no_workflow_files_reports_not_applicable(monkeypatch, tmp_path, capsys):
     """ワークフローファイルが一件も無い状態ではNOT_APPLICABLEを報告する
     (§BOで修正したPASS/NOT_APPLICABLE混同の再発防止)。"""
