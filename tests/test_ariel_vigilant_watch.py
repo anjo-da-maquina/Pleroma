@@ -258,6 +258,80 @@ def test_battery_detects_reintroduced_sanctuary_ci_regression(monkeypatch):
             assert e.code == 1
 
 
+def test_detects_job_level_always_false_condition():
+    """[核心・新設 2026-11・§CVの直後] ジョブ定義自身の`if:`が常に偽の
+    場合、そのジョブ配下の全ステップが丸ごと実行されないにもかかわらず、
+    既存の`find_disabled_steps`(ステップ単位のみを見る)はこれを一度も
+    検知しなかった。`.github/workflows/sanctuary_ci.yml`に実際に
+    `if: false`をジョブ定義直下へ一時的に追加して再現し、本検査が正しく
+    検知することを実機で確認済み(git diff --statで完全に復元したことも
+    確認済み)。"""
+    text = (
+        "jobs:\n"
+        "  verify_ataraxia:\n"
+        "    if: false\n"
+        "    steps:\n"
+        "      - name: step1\n"
+        "        run: pytest tests/\n"
+    )
+    assert avw.find_disabled_jobs(text) == ["verify_ataraxia"]
+
+
+def test_does_not_flag_job_level_dynamic_condition():
+    """ジョブレベルの`if: success()`のような通常の(他のジョブの結果に
+    依存する)動的条件は検知対象としない。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    if: success()\n"
+        "    steps:\n"
+        "      - name: step1\n"
+        "        run: pytest tests/\n"
+    )
+    assert avw.find_disabled_jobs(text) == []
+
+
+def test_does_not_flag_job_with_no_if_at_all():
+    """ジョブレベルの`if:`自体が存在しない通常のジョブは検知対象に
+    ならない(誤検知しない)。"""
+    text = (
+        "jobs:\n"
+        "  j:\n"
+        "    steps:\n"
+        "      - name: step1\n"
+        "        run: pytest tests/\n"
+    )
+    assert avw.find_disabled_jobs(text) == []
+
+
+def test_battery_detects_job_level_if_false_regression(monkeypatch):
+    """[自己レッドチームの固定] main()レベルでも、ジョブ丸ごと無効化が
+    正しくFAILとして報告されることを、一時ディレクトリ上の最小再現
+    ワークフローで固定する。"""
+    import tempfile
+    from pathlib import Path
+
+    with tempfile.TemporaryDirectory() as td:
+        wf_dir = Path(td) / ".github" / "workflows"
+        wf_dir.mkdir(parents=True)
+        (wf_dir / "sabotaged.yml").write_text(
+            "jobs:\n"
+            "  verify_ataraxia:\n"
+            "    if: false\n"
+            "    steps:\n"
+            "      - name: step1\n"
+            "        run: pytest tests/\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(avw, "ROOT", Path(td))
+        monkeypatch.setattr(avw, "TARGET_WORKFLOW_DIR", wf_dir)
+        try:
+            avw.main()
+            assert False, "FAILするはずのmain()がsys.exit(1)しなかった"
+        except SystemExit as e:
+            assert e.code == 1
+
+
 def test_no_workflow_files_reports_not_applicable(monkeypatch, tmp_path, capsys):
     """ワークフローファイルが一件も無い状態ではNOT_APPLICABLEを報告する
     (§BOで修正したPASS/NOT_APPLICABLE混同の再発防止)。"""

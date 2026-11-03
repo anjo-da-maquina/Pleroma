@@ -158,6 +158,35 @@ def find_disabled_steps(workflow_text: str, filename: str = "<unknown>"):
     return disabled
 
 
+# [新設 2026-11・§CVの直後] `find_disabled_steps`は、ステップ単位の
+# `if: false`のみを検知し、**ジョブそのものの`if:`**(ジョブ定義の
+# トップレベルに置かれた、全ステップに影響するもの)は一度も検査して
+# いなかったことに気づいた。`jobs.<job_id>.if`に常に偽になる条件を
+# 1行追加するだけで、そのジョブ配下の全ステップ(「失敗時の詳細を
+# コミットコメントとして可視化」のような後処理ステップも含む)が、
+# 個々のステップの`if:`を一切変更せずに丸ごと無効化できる――
+# ステップ単位の検知を1レベル上から完全に迂回できる、同一クラスの
+# 欠陥の兄弟である。
+def find_disabled_jobs(workflow_text: str):
+    """このワークフローYAML内で、ジョブ定義自身の`if:`が常に偽になって
+    いる(=そのジョブの全ステップが丸ごと実行されない)ジョブを検出
+    する。戻り値: [job_name, ...]"""
+    try:
+        workflow = yaml.safe_load(workflow_text)
+    except yaml.YAMLError:
+        return []
+    if not isinstance(workflow, dict):
+        return []
+
+    disabled_jobs = []
+    for job_name, job in (workflow.get("jobs") or {}).items():
+        if not isinstance(job, dict):
+            continue
+        if _is_literal_always_false(job.get("if")):
+            disabled_jobs.append(job_name)
+    return disabled_jobs
+
+
 def main():
     if not TARGET_WORKFLOW_DIR.exists():
         report_not_applicable(NAME, "ワークフローディレクトリが存在しないため検査対象なし。")
@@ -170,16 +199,28 @@ def main():
 
     disabled = []  # [(file, job, step), ...]
     unchecked_coe = []  # [(file, job, step, reason), ...]
+    disabled_jobs = []  # [(file, job), ...]
     for wf_path in workflow_files:
         text = wf_path.read_text(encoding="utf-8")
         for job_name, step_name in find_disabled_steps(text, filename=str(wf_path)):
             disabled.append((wf_path.relative_to(ROOT).as_posix(), job_name, step_name))
         for job_name, step_name, reason in find_unchecked_continue_on_error_steps(text):
             unchecked_coe.append((wf_path.relative_to(ROOT).as_posix(), job_name, step_name, reason))
+        for job_name in find_disabled_jobs(text):
+            disabled_jobs.append((wf_path.relative_to(ROOT).as_posix(), job_name))
 
-    if disabled or unchecked_coe:
+    if disabled or unchecked_coe or disabled_jobs:
         messages = []
         evidence = {}
+        if disabled_jobs:
+            detail = "; ".join(f"{f}:{j}" for f, j in disabled_jobs)
+            messages.append(
+                f"ジョブ定義自身の`if:`が常に偽になっており、そのジョブ"
+                f"配下の全ステップが丸ごと実行されない(ステップ単位の"
+                f"if: false検知を1レベル上から迂回する、同一クラスの"
+                f"欠陥)ジョブが見つかりました: {detail}"
+            )
+            evidence["disabled_jobs"] = disabled_jobs
         if disabled:
             detail = "; ".join(f"{f}:{j}:{s}" for f, j, s in disabled)
             messages.append(
@@ -204,10 +245,10 @@ def main():
 
     report_pass(
         NAME,
-        f"{len(workflow_files)}件のワークフローファイルの全ステップについて、"
-        f"常に偽になるif:条件による無効化、および`continue-on-error: true`の"
-        f"失敗が握り潰されたまま後続ステップで一度も参照されない状態の、"
-        f"いずれも無いことを確認しました。",
+        f"{len(workflow_files)}件のワークフローファイルの全ジョブ・全ステップに"
+        f"ついて、常に偽になるif:条件によるジョブ/ステップ単位の無効化、および"
+        f"`continue-on-error: true`の失敗が握り潰されたまま後続ステップで"
+        f"一度も参照されない状態の、いずれも無いことを確認しました。",
     )
 
 
