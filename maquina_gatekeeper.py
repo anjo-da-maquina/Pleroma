@@ -220,10 +220,29 @@ def _register_audit_hook_once():
         # allowed_hosts方式を持たないブラント(接続先を問わず一律遮断)な
         # 設計のため、`socket.connect`等と同じ扱いで"socket.getaddrinfo"
         # 自体をforbidden集合に追加する。
+        #
+        # [脆弱性修正 2026-11 §CU] §CTの修正直後、「DNS名前解決APIは
+        # getaddrinfoだけか」を実機で棚卸ししたところ、`socket.
+        # gethostbyname()`/`gethostbyname_ex()`(いずれも専用の単一の
+        # audit event"socket.gethostbyname"を発火)・
+        # `socket.gethostbyaddr()`("socket.gethostbyaddr")・
+        # `socket.getnameinfo()`("socket.getnameinfo")も、同じ
+        # DNS exfiltration経路になり得るにもかかわらず、本ファイルの
+        # forbidden集合に一度も含まれていなかったことを発見した(実機で
+        # `set_sanctuary_sealed(True)`の状態でも`socket.gethostbyname()`
+        # が例外無しに成立することを確認済み)。独立した別の防御層である
+        # `sefer/__init__.py`の`_michael_absolute_defense`は、これらの
+        # イベント名に対する個別の列挙ではなく、引数からホスト名/アドレス
+        # を抽出する汎用ロジック(「2. ソケット通信検査」)を既に備えて
+        # いたため、§CTより前から自動的に保護されていたことを実機で確認
+        # 済みである(本件の対象ではない)。本ファイル(Gatekeeper)単独
+        # でも防御が成立することを保証するため、§CC・§CE・§CT同様、
+        # forbidden集合にも明示的に追加する。
         forbidden = {
             "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
             "os.fork", "os.forkpty",
             "socket.connect", "socket.sendto", "socket.sendmsg", "socket.getaddrinfo",
+            "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo",
             "ctypes.dlopen", "ctypes.dlsym",
         }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):

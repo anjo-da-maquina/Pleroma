@@ -97,6 +97,41 @@ def test_battery_detects_getaddrinfo_regression(monkeypatch):
     assert failures[0][0] == "maquina_gatekeeper.ultimate_audit_hook: DNS名前解決遮断(§CT)"
 
 
+def test_check_legacy_dns_lookups_are_blocked_while_sealed_directly():
+    """[新設 §CU] gethostbyname/gethostbyname_ex/gethostbyaddr/
+    getnameinfoという旧API経由のDNS関連呼び出しが、封鎖中に正しく
+    遮断されることを、継続的に再検証する。"""
+    success, detail = jeg._check_legacy_dns_lookups_are_blocked_while_sealed()
+    assert success is True, detail
+
+
+def test_check_legacy_dns_lookups_are_allowed_when_unsealed_directly():
+    success, detail = jeg._check_legacy_dns_lookups_are_allowed_when_unsealed()
+    assert success is True, detail
+
+
+def test_battery_detects_legacy_dns_lookup_regression(monkeypatch):
+    """[核心・自己レッドチームの固定・§CU] maquina_gatekeeper.pyの
+    forbidden集合から"socket.gethostbyname"等が(将来の変更で)取り除か
+    れた場合、本天使が正しく「遮断されなかった」として検知することを、
+    実際にforbidden集合からこれらのエントリを一時的に取り除いて再現
+    して確認済み(取り除いた状態では本テストと同じ失敗を実機で確認し、
+    復元するとPASSに戻ることを確認した)。"""
+    def _vulnerable_check():
+        return False, "封鎖中にsocket.gethostbynameが遮断されなかった(模擬)"
+
+    patched_checks = [
+        ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", jeg._check_udp_sendto_is_blocked_while_sealed),
+        ("maquina_gatekeeper.ultimate_audit_hook: 旧API DNS関連遮断(gethostbyname等, §CU)", _vulnerable_check),
+        ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(旧API DNS関連, §CU)", jeg._check_legacy_dns_lookups_are_allowed_when_unsealed),
+    ]
+    monkeypatch.setattr(jeg, "CHECKS", patched_checks)
+
+    failures = jeg.run_battery()
+    assert len(failures) == 1
+    assert failures[0][0] == "maquina_gatekeeper.ultimate_audit_hook: 旧API DNS関連遮断(gethostbyname等, §CU)"
+
+
 def test_battery_detects_reintroduced_regression(monkeypatch):
     """[核心・自己レッドチームの固定] §CA修正前の、"socket.connect"のみを
     遮断する素朴な実装に戻した場合、本天使が正しく「遮断されなかった」
