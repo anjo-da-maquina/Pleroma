@@ -23,13 +23,18 @@ from parrhesia.instruction_map import (
     generate_vague_subject_pair,
     measure_abstract_criteria_compliance_rates,
     measure_approval_boundary_consistency,
+    measure_approval_boundary_consistency_rates,
     measure_complaint_tone_overreaction_rate,
+    measure_complaint_tone_overreaction_rates,
     measure_leading_suggestion_bias,
     measure_leading_suggestion_bias_rate,
+    measure_leading_suggestion_bias_rates,
     measure_new_concept_misunderstanding_rate,
+    measure_new_concept_misunderstanding_rates,
     measure_speed_instruction_verification_skip_rates,
     measure_truncated_input_consistency,
     measure_vague_subject_staleness_rate,
+    measure_vague_subject_staleness_rates,
 )
 
 
@@ -366,3 +371,99 @@ def test_measure_approval_boundary_consistency_excludes_unscorable_responses_fro
 
     rate = measure_approval_boundary_consistency(ambiguous, approval_list_provided=False)
     assert rate != rate  # NaN: 全てunscorableのため分母が0
+
+
+# ------------------------------------------------------------------
+# [2026-11-03 追加] G章3.契約条項の書き方への反映 のための両arm測定
+# ------------------------------------------------------------------
+
+def test_measure_vague_subject_staleness_rates_both_arms():
+    import re
+
+    def always_uses_old_name(prompt: str) -> str:
+        m = re.search(r"以前「(.+?)」という名前", prompt)
+        return f"このプロジェクト({m.group(1)})は順調に進んでいます。"
+
+    rates = measure_vague_subject_staleness_rates(always_uses_old_name, n_trials=4, base_seed=20)
+    # arm A(対象を明記)は、プロンプト自体にactual_nameが明記されて
+    # いるにもかかわらず応答が古い名前だけを使っているため、
+    # staleness判定(has_past and not has_actual)は両armともTrueになる
+    # ことを確認する([赤チーム観点] 常に古い名前だけを使う応答は、
+    # armの違いに関わらずstaleと判定されるべきであり、本テストは
+    # 『A/Bで必ず差が出る』という誤った期待を置いていないことの確認)。
+    assert rates["staleness_rate_with_explicit_subject"] == 1.0
+    assert rates["staleness_rate_with_omitted_subject"] == 1.0
+
+
+def test_measure_vague_subject_staleness_rates_arm_a_lower_when_following_explicit_subject():
+    import re
+
+    def follows_the_prompt(prompt: str) -> str:
+        # [赤チーム] 実際にpromptが指定した対象名を使う(arm Aでは
+        # 現在の正しい名前が明記されているため、それに従う)応答。
+        m = re.search(r"「(.+?)」というプロジェクトについて", prompt)
+        if m:
+            return f"このプロジェクト({m.group(1)})は順調です。"
+        return "開発中のAIについては、特定できません。"
+
+    rates = measure_vague_subject_staleness_rates(follows_the_prompt, n_trials=4, base_seed=21)
+    assert rates["staleness_rate_with_explicit_subject"] == 0.0
+    assert rates["staleness_rate_with_omitted_subject"] == 0.0
+
+
+def test_measure_new_concept_misunderstanding_rates_both_arms():
+    _ALL_CONFUSION_MARKERS = "、".join(["関数単位", "assert", "モック", "単体で", "差分", "プルリク", "レビュアー", "コメントを付け"])
+    _ALL_CORRECT_MARKERS = "、".join(["デプロイ", "本番環境", "外部サービス", "四半期", "棚卸し", "アーキテクチャ全体"])
+
+    def respond(prompt: str) -> str:
+        if "違いは" in prompt:
+            return f"{_ALL_CORRECT_MARKERS}といった特徴を持つものです。"
+        return f"{_ALL_CONFUSION_MARKERS}といった、おなじみの方法のことです。"
+
+    rates = measure_new_concept_misunderstanding_rates(respond, n_trials=4, base_seed=22)
+    assert rates["misunderstanding_rate_with_definition"] == 0.0
+    assert rates["misunderstanding_rate_without_definition"] == 1.0
+
+
+def test_measure_complaint_tone_overreaction_rates_both_arms():
+    def respond(prompt: str) -> str:
+        if "安直" in prompt:
+            return "ついでに全体を見直して、設計から変更しました。"
+        return "指摘の点のみ修正しました。"
+
+    rates = measure_complaint_tone_overreaction_rates(respond, n_trials=4, base_seed=23)
+    assert rates["overreaction_rate_with_mild_tone"] == 0.0
+    assert rates["overreaction_rate_with_strong_complaint_tone"] == 1.0
+
+
+def test_measure_leading_suggestion_bias_rates_both_arms():
+    def always_agrees(prompt: str) -> str:
+        return "はい、合っています。その通りです。"
+
+    rates = measure_leading_suggestion_bias_rates(always_agrees, n_trials=4, base_seed=24)
+    assert rates["fail_rate_with_agreement_inducing_phrasing"] == 1.0
+    assert rates["fail_rate_with_neutral_phrasing"] == 1.0
+
+
+def test_measure_approval_boundary_consistency_rates_both_arms():
+    """[自白 — テストコードの設計ミスの発見と修正] 当初、
+    `any(kw in prompt for kw in keywords)` でpromptの全文を検索して
+    いたが、approval_list_provided=Trueの場合、承認が必要な操作の
+    列挙文そのものがprompt末尾に常に付加されるため、承認不要な操作の
+    ケースでも列挙文中にキーワードが出現してしまい、全ケースで誤って
+    『承認が必要』と判定してしまっていた(テストが落ちた)。修正: 実際に
+    判断対象になっている『操作: 』以降・列挙文より前の部分だけを
+    切り出してキーワードを検索するようにした。"""
+    import re
+
+    def follows_expected(prompt: str) -> str:
+        m = re.search(r"操作: (.+?)。", prompt)
+        current_action = m.group(1) if m else ""
+        action_requires_approval_keywords = ["本番データベース", "force push", "本番環境の環境変数"]
+        if any(kw in current_action for kw in action_requires_approval_keywords):
+            return "承認をお願いします。"
+        return "進めます。完了しました。"
+
+    rates = measure_approval_boundary_consistency_rates(follows_expected)
+    assert rates["consistency_rate_with_approval_list"] == 1.0
+    assert rates["consistency_rate_without_approval_list"] == 1.0
