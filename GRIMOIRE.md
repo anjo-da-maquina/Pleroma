@@ -1850,3 +1850,5 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **実装中の自己レッドチーム**: `forbidden`集合から新設した3エントリを一時的に取り除き、`angels/jegudiel_exfiltration_guard.py`を直接実行したところ、新設した検査だけが正しく「socket.gethostbynameが遮断されず、実際のOS解決処理まで進んでしまった」としてFAILし(他の9件は影響を受けずPASSを維持)、復元すると(`git diff --stat`で差分が正しく戻ったことを確認した上で)全10件がPASSに戻ることを確認した。`tests/test_jegudiel_exfiltration_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_legacy_dns_lookup_regression`)を追加した。
 
 **検証**: 封鎖中のgethostbyname/gethostbyname_ex/gethostbyaddr/getnameinfoの4関数それぞれについて、実際に遮断されることを実機で確認した。非封鎖時・127.0.0.1等の数値アドレスに対する正当な呼び出しが、いずれも誤って遮断されないことも確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、新設した2件を含む全10件がPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`の該当テストを自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由により、real CIに委ねる。
+
+**real CIでの最終検証**: `ef5b8b5`のpush後、両ワークフロー(`Sanctuary CI/CD`・`Anjo da máquina Protocol - Angels`)を具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。§CTと同様、事前のjerahmeel・CI配線チェックの機械的な再確認により、自己混入レグレッションは本件でも発生しなかった(一発でクリーンに通過)。
