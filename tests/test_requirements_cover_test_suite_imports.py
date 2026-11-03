@@ -42,7 +42,7 @@ ALLOWLIST = {"pytest"}  # pytest自身はrequirements.txtに実在するが念�
 # tests/配下のテストが `sys.path.insert` 経由でimportするリポジトリ内の
 # ローカルモジュール群のディレクトリ。これらの直下にある .py ファイルの
 # stem名は「サードパーティ依存」ではないため、照合対象から除外する。
-LOCAL_MODULE_DIRS = ["angels", "src", "sefer", "adapters", "anjo_interceptor", "tools", "tartarus"]
+LOCAL_MODULE_DIRS = ["angels", "src", "sefer", "adapters", "anjo_interceptor", "tools", "tartarus", "parrhesia"]
 
 
 def _local_module_names() -> set:
