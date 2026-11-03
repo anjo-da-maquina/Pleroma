@@ -1868,3 +1868,17 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **実装中の自己レッドチーム**: `.github/workflows/sanctuary_ci.yml`から`if: steps.sanctuary_verify.outcome == 'failure'`の行を実際に一時的に取り除き、`angels/ariel_vigilant_watch.py`を直接実行したところ、新設した検査が正しく「continue-on-error: trueだが、同じジョブ内のどの後続ステップもsteps.sanctuary_verify.outcome/.conclusionを一度も参照していない」としてFAIL(終了コード1)することを実機で確認した。`git diff --stat .github/workflows/sanctuary_ci.yml`で差分が完全に消えたことを確認した上で復元し、再実行してPASSに戻ることも確認した。合成テストケース(idが無い場合・`.conclusion`経由で参照する場合・`continue-on-error: false`の場合・`continue-on-error`自体が無い通常ステップの場合)も`tests/test_ariel_vigilant_watch.py`に追加し、自作の`FakeMonkeypatch`ハーネスで全てPASSすることを確認した。
 
 **検証**: 現時点の実際の`.github/workflows/*.yml`(2ファイル)に対して`angels/ariel_vigilant_watch.py`を直接実行し、PASSすることを確認した(唯一の`continue-on-error: true`使用箇所である§BQの`sanctuary_verify`ステップが、正しくoutcome enforcementされていると認識されたことの裏付け)。`tests/test_ariel_vigilant_watch.py`に追加した8件の新規テスト(検知2パターン・非検知4パターン・idなしパターン・一時ディレクトリ上の最小再現ワークフローによるmain()レベルの退行固定テスト)を自作の`FakeMonkeypatch`ハーネスで直接実行し、既存の8件を含め全16件がPASSすることを確認した。本件はPythonレベルの監査フックではなくCI設定ファイルの静的解析であるため、`rsa`/`maquina_gatekeeper.py`への依存は無く、このセッション内で完全に検証できた(スタブ不要)。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由(リポジトリ全体のconftest.pyがmaquina_gatekeeper経由でrsaに依存するため)により、real CIに委ねる。
+
+### §CW: `angels/ariel_vigilant_watch.py`(§CVでcontinue-on-error検知を追加した直後)が、ステップ単位の`if: false`検知を1レベル上から迂回する「ジョブ単位の`if: false`」を一度も検査していなかった
+
+**発見**: §CVの修正直後、「`if: false`によるCI無効化は、本当にステップ単位でしか起こり得ないか」を点検した。既存の`find_disabled_steps()`(§BU)は`workflow["jobs"][job_name]["steps"]`配下の各ステップの`if:`のみを検査しており、GitHub Actionsのジョブ定義自体が持てる`jobs.<job_id>.if`(そのジョブ全体の実行条件、ステップの`if:`とは別のYAMLキー)は一度も検査対象になっていなかった。実機で、`jobs.<job_id>.if: false`をジョブ定義の直下に追加して`angels/ariel_vigilant_watch.py`を実行したところ、ステップ単位の検査($BU)・continue-on-error検査(§CV)のいずれも検知せず、PASSを返し続けることを確認した――GitHub Actionsの仕様上、ジョブの`if:`が偽であれば配下の全ステップ(失敗時の後処理ステップも含む)が丸ごとスキップされるため、これは§BUが検知する欠陥よりも影響範囲が広い、同一クラスの欠陥の兄弟である。
+
+**たとえ話**: 警備員個人の勤務表に「今日は休み」と書く(§BU)代わりに、警備会社全体の契約書に「このビル(ジョブ)の警備は、ある条件下では実施しない」という一文を追加するようなものである。個々の警備員の勤務表は普段通りに見えても、契約条項レベルで警備そのものが丸ごと発動しなくなる。
+
+**原因**: §BU新設時、「`run:`を持つ各ステップのif:条件」という最初に見つけた具体的な欠陥のみを一般化し、GitHub Actionsのワークフロー構文において`if:`がステップだけでなくジョブ自身にも存在するという事実の横展開(同じYAMLキー名が異なる階層で同じ効果を持つ)が行われていなかった。
+
+**対応**: `angels/ariel_vigilant_watch.py`に`find_disabled_jobs()`を新設し、各ジョブ定義自身の`if:`が常に偽になっているジョブを検出するようにした。`main()`で既存の2種類の検知(ステップ単位のif:false・continue-on-error握り潰し)と統合し、いずれかが検知した場合にFAILする。
+
+**実装中の自己レッドチーム**: `.github/workflows/sanctuary_ci.yml`の`verify_ataraxia`ジョブ定義の直下に、実際に`if: false`を一時的に追加し、`angels/ariel_vigilant_watch.py`を直接実行したところ、新設した検査が正しく「ジョブ定義自身のif:が常に偽になっており、そのジョブ配下の全ステップが丸ごと実行されない」としてFAIL(終了コード1)することを実機で確認した。`git diff --stat .github/workflows/sanctuary_ci.yml`で差分が完全に消えたことを確認した上で復元し、再実行してPASSに戻ることも確認した。合成テストケース(ジョブ単位の検知・動的条件での非検知・if:自体が無い場合の非検知)を`tests/test_ariel_vigilant_watch.py`に追加し、一時ディレクトリ上の最小再現ワークフローによるmain()レベルの退行固定テストも含め、自作の`FakeMonkeypatch`ハーネスで全てPASSすることを確認した。
+
+**検証**: 現時点の実際の`.github/workflows/*.yml`(2ファイル)に対して本天使を実行し、PASSすることを確認した。`tests/test_ariel_vigilant_watch.py`に追加した4件の新規テストを含め、本ファイル全20件(§CV以前からの既存8件+§CVで追加した8件+本件で追加した4件)がPASSすることを確認した。本件もCI設定ファイルの静的解析のみであり、`rsa`依存は無くセッション内で完全に検証できた。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由により、real CIに委ねる。
