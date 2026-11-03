@@ -211,6 +211,21 @@ def measure_leading_suggestion_bias_rate(respond: RespondFn, n_trials: int = 5, 
     return sum(1 for r in results if r.agreement_bias_detected) / n_trials
 
 
+def measure_leading_suggestion_bias_rates(respond: RespondFn, n_trials: int = 5, base_seed: int = 0) -> Dict[str, float]:
+    """[2026-11-03 追加 — G章3.契約条項の書き方への反映のための拡張]
+    (A)同意誘導の言い回し/(B)中立的な言い回しそれぞれについて、
+    『誤りを訂正できなかった(同意してしまった=fail)』率を返す。
+    agreement_bias_detected(反転の有無)だけでなく、各armの絶対的な
+    fail率も、安全な書き方の効果測定に使えるようにするための拡張。"""
+    results = [measure_leading_suggestion_bias(respond, seed=base_seed * 1000 + i) for i in range(n_trials)]
+    n_fail_a = sum(1 for r in results if r.verdict_a == "fail")
+    n_fail_b = sum(1 for r in results if r.verdict_b == "fail")
+    return {
+        "fail_rate_with_agreement_inducing_phrasing": n_fail_a / n_trials,
+        "fail_rate_with_neutral_phrasing": n_fail_b / n_trials,
+    }
+
+
 # ------------------------------------------------------------------
 # 3. 対象・主語の省略: 過去記録に別の名前がある状況での補完率
 # ------------------------------------------------------------------
@@ -288,6 +303,30 @@ def measure_vague_subject_staleness_rate(respond: RespondFn, n_trials: int = 5, 
         if result_b.verdict == "stale_borrow":
             n_stale += 1
     return n_stale / n_trials
+
+
+def measure_vague_subject_staleness_rates(respond: RespondFn, n_trials: int = 5, base_seed: int = 0) -> Dict[str, float]:
+    """[2026-11-03 追加 — G章3.契約条項の書き方への反映のための拡張]
+    対象を明記した場合(arm A)/省略した場合(arm B)それぞれについて、
+    stale_borrow率を返す。既存のmeasure_vague_subject_staleness_rate
+    (arm Bのみ)と異なり、A/B両方を同じtrialのprompt_a/prompt_bに対して
+    測定するため、parrhesia.contract_styleがこの関数の出力を直接
+    『安全な書き方(対象を明記)の方が実際に改善したか』の判定に使える。"""
+    n_stale_a = 0
+    n_stale_b = 0
+    for i in range(n_trials):
+        seed = base_seed * 1000 + i
+        prompt_a, prompt_b, past_record_name, actual_name = generate_vague_subject_pair(seed)
+        result_a = _grade_vague_subject(respond(prompt_a), past_record_name, actual_name)
+        result_b = _grade_vague_subject(respond(prompt_b), past_record_name, actual_name)
+        if result_a.verdict == "stale_borrow":
+            n_stale_a += 1
+        if result_b.verdict == "stale_borrow":
+            n_stale_b += 1
+    return {
+        "staleness_rate_with_explicit_subject": n_stale_a / n_trials,
+        "staleness_rate_with_omitted_subject": n_stale_b / n_trials,
+    }
 
 
 # ------------------------------------------------------------------
@@ -433,6 +472,27 @@ def measure_new_concept_misunderstanding_rate(respond: RespondFn, n_trials: int 
     return n_misunderstood / n_trials
 
 
+def measure_new_concept_misunderstanding_rates(respond: RespondFn, n_trials: int = 5, base_seed: int = 0) -> Dict[str, float]:
+    """[2026-11-03 追加 — G章3.契約条項の書き方への反映のための拡張]
+    定義を添えた場合(arm A)/添えない場合(arm B)それぞれについて、
+    既知概念への吸着による誤解率を返す。"""
+    n_misunderstood_a = 0
+    n_misunderstood_b = 0
+    for i in range(n_trials):
+        seed = base_seed * 1000 + i
+        prompt_a, prompt_b, item = generate_new_concept_pair(seed)
+        result_a = _grade_new_concept_response(respond(prompt_a), item["correct_markers"], item["confusion_markers"])
+        result_b = _grade_new_concept_response(respond(prompt_b), item["correct_markers"], item["confusion_markers"])
+        if result_a.treated_as_known_concept:
+            n_misunderstood_a += 1
+        if result_b.treated_as_known_concept:
+            n_misunderstood_b += 1
+    return {
+        "misunderstanding_rate_with_definition": n_misunderstood_a / n_trials,
+        "misunderstanding_rate_without_definition": n_misunderstood_b / n_trials,
+    }
+
+
 # ------------------------------------------------------------------
 # 6. 速度の指示: 速度指示あり/なしでの検証言及率
 # ------------------------------------------------------------------
@@ -557,6 +617,27 @@ def measure_complaint_tone_overreaction_rate(respond: RespondFn, n_trials: int =
     return n_overreacted / n_trials
 
 
+def measure_complaint_tone_overreaction_rates(respond: RespondFn, n_trials: int = 5, base_seed: int = 0) -> Dict[str, float]:
+    """[2026-11-03 追加 — G章3.契約条項の書き方への反映のための拡張]
+    穏やかな口調(mild)/強い不満の口調(strong)それぞれについて、
+    過剰に作り直してしまう(overreacted)率を返す。"""
+    n_overreacted_mild = 0
+    n_overreacted_strong = 0
+    for i in range(n_trials):
+        seed = base_seed * 1000 + i
+        prompt_mild, prompt_strong = generate_complaint_tone_pair(seed)
+        result_mild = _grade_complaint_tone_response(respond(prompt_mild))
+        result_strong = _grade_complaint_tone_response(respond(prompt_strong))
+        if result_mild.overreacted:
+            n_overreacted_mild += 1
+        if result_strong.overreacted:
+            n_overreacted_strong += 1
+    return {
+        "overreaction_rate_with_mild_tone": n_overreacted_mild / n_trials,
+        "overreaction_rate_with_strong_complaint_tone": n_overreacted_strong / n_trials,
+    }
+
+
 # ------------------------------------------------------------------
 # 8. 権限の委任: 境界事例での止まる/進むの一貫性
 # ------------------------------------------------------------------
@@ -639,3 +720,21 @@ def measure_approval_boundary_consistency(
     if n_scorable == 0:
         return float("nan")
     return n_consistent / n_scorable
+
+
+def measure_approval_boundary_consistency_rates(
+    respond: RespondFn, boundary_cases: List[Dict[str, object]] = None
+) -> Dict[str, float]:
+    """[2026-11-03 追加 — G章3.契約条項の書き方への反映のための拡張]
+    承認が必要な操作の列挙あり/なしそれぞれについて、一貫性の率を返す。
+    注意: 他の属性の『両arm率』と異なり、ここは**高いほど良い**指標
+    (一貫性)である点が逆であることに注意(parrhesia.contract_styleの
+    呼び出し側で、この方向の違いを正しく扱う必要がある)。"""
+    return {
+        "consistency_rate_with_approval_list": measure_approval_boundary_consistency(
+            respond, approval_list_provided=True, boundary_cases=boundary_cases
+        ),
+        "consistency_rate_without_approval_list": measure_approval_boundary_consistency(
+            respond, approval_list_provided=False, boundary_cases=boundary_cases
+        ),
+    }
