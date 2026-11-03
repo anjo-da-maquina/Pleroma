@@ -203,10 +203,27 @@ def _register_audit_hook_once():
         # することを保証するため、§CC同様、構造的に並行する別の層が
         # たまたま塞いでいることに頼らず、本ファイル自身のforbidden集合
         # にも明示的に追加する。
+        #
+        # [脆弱性修正 2026-11 §CT] forbidden集合は接続(connect)・UDP送信
+        # (sendto/sendmsg)を遮断していたが、`socket.getaddrinfo()`による
+        # DNS名前解決そのものは一度も含めていなかった。これは`connect`を
+        # 一切経由せずに、機密データをサブドメインラベルに符号化して
+        # DNSクエリとして外部(攻撃者が管理する権威DNSサーバー)へ送出
+        # できる、古典的な「DNS exfiltration」技法である。実機で、
+        # `set_sanctuary_sealed(True)`の状態でも`socket.getaddrinfo()`が
+        # 例外無しに成立し、このサンドボックス自身のDNS到達性の欠如に
+        # よるOSErrorでのみ失敗すること(=本フックが何も遮断していない
+        # こと)を確認した。独立した別の防御層である`sefer/__init__.py`の
+        # `_michael_absolute_defense`も、同じ理由でこれまで
+        # "socket.getaddrinfo"を無条件に通過させていた(GRIMOIRE.md §CT、
+        # 本ファイルの修正はそちらとは独立した同種の修正)。本ファイルは
+        # allowed_hosts方式を持たないブラント(接続先を問わず一律遮断)な
+        # 設計のため、`socket.connect`等と同じ扱いで"socket.getaddrinfo"
+        # 自体をforbidden集合に追加する。
         forbidden = {
             "subprocess.Popen", "os.system", "os.exec", "os.posix_spawn",
             "os.fork", "os.forkpty",
-            "socket.connect", "socket.sendto", "socket.sendmsg",
+            "socket.connect", "socket.sendto", "socket.sendmsg", "socket.getaddrinfo",
             "ctypes.dlopen", "ctypes.dlsym",
         }
         if event in forbidden or (event == "import" and args and args[0] in {"ctypes", "_ctypes", "threading"}):

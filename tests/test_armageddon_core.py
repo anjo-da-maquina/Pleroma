@@ -39,16 +39,38 @@ def test_validate_banned_event_rejects_critical_infrastructure():
 
 def test_validate_banned_event_rejects_structurally_unenforceable_events():
     """[脆弱性修正 2026-10 §BJ] sefer.ALWAYS_PASSTHROUGH_AUDIT_EVENTSに含まれる
-    イベント名(例: "socket.getaddrinfo")は、sefer._michael_absolute_defenseが
+    イベント名(例: "socket.socket")は、sefer._michael_absolute_defenseが
     ソケット検査・デフォルト拒否のいずれの分岐でも常に無条件で通過させるため、
     raziel_ledger.jsonにどれだけ追加しても絶対に禁止できない。人間が『承認した
     のに実は何も保護していない』という偽の安心感を持つことを防ぐため、
     この時点で事前に拒否されなければならない(CRITICAL_INFRASTRUCTUREの
-    自己免疫疾患ガードとは別の、見せかけの保護ガード)。"""
-    for unenforceable in ("socket.getaddrinfo", "socket.socket", "socket.__init__", "os.path"):
+    自己免疫疾患ガードとは別の、見せかけの保護ガード)。
+
+    [脆弱性修正 2026-11 §CT] "socket.getaddrinfo"は以前この一覧に含まれて
+    いたが、DNS解決そのものがデータ持ち出し経路になり得ること(機密データを
+    サブドメインラベルに符号化して解決させるだけで、connect()を一切経由
+    せずに攻撃者のDNSサーバーへ送出できる)を実機で確認したため、
+    `sefer._michael_absolute_defense`に専用のallowed_hosts検査を新設し、
+    `ALWAYS_PASSTHROUGH_AUDIT_EVENTS`から除外した(GRIMOIRE.md §CT参照)。
+    その結果、"socket.getaddrinfo"は"socket.connect"等と同じ「既に別の
+    条件付きチェックで実際に保護されている」カテゴリに移ったため、本テスト
+    の対象(見せかけの保護)からは外れる――`validate_banned_event`が
+    これを`True`(有効)と判定するのは、もはや正しい挙動である。"""
+    for unenforceable in ("socket.socket", "socket.__init__", "os.path"):
         ok, reason = core.validate_banned_event(unenforceable)
         assert ok is False, f"'{unenforceable}' は構造的に実行不能として拒否されるべき"
         assert "never actually be enforced" in reason or "illusory" in reason
+
+
+def test_validate_banned_event_accepts_getaddrinfo_after_ct_fix():
+    """[新設 2026-11 §CT] "socket.getaddrinfo"は、§CTの修正により
+    `sefer._michael_absolute_defense`内で実際にallowed_hostsチェックを
+    受ける(見せかけではなく本当に保護される)ようになったため、
+    `validate_banned_event`はこれを有効なイベント名として受理する
+    (もはや`ALWAYS_PASSTHROUGH_AUDIT_EVENTS`に含まれていないことの
+    回帰防止)。"""
+    ok, reason = core.validate_banned_event("socket.getaddrinfo")
+    assert ok is True, f"§CTの修正後は'socket.getaddrinfo'は受理されるべき: {reason}"
 
 
 def test_validate_banned_event_still_accepts_genuinely_new_enforceable_events():
