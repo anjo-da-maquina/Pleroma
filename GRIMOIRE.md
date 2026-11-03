@@ -1811,3 +1811,5 @@ python: can't open file '/jail/target.py': [Errno 13] Permission denied
 **自己レッドチーム**: `maquina_gatekeeper.py`の`forbidden`集合から`"os.forkpty"`を一時的に取り除き(`git diff`で変更箇所が1行のみであることを確認した上で)、新設した`os.forkpty`遮断検査だけが正しく「封鎖中にos.forkpty()によるプロセス生成が遮断されなかった」としてFAILすることを確認し、元に戻すと(`git diff --stat`で差分が完全に消えたことまで確認した上で)全4件がPASSに戻ることを確認した。`tests/test_zerachiel_process_spawn_guard.py`にも、架空の脆弱な検査関数を与えてこの退行を再現する回帰テスト(`test_battery_detects_reintroduced_forkpty_regression`)を追加した。
 
 **検証**: `angels/zerachiel_process_spawn_guard.py`を直接実行し(前述のrsaスタブを用いて)、新設した2件を含む全4件がPASSすることを確認した。`tests/test_zerachiel_process_spawn_guard.py`の全7件を、自作の`FakeMonkeypatch`ハーネスで直接実行し、全てPASSすることを確認した。`angels/jerahmeel_fail_open_guard.py`による正当化コメント漏れの事前チェックも実施済み。本件はコードの修正を伴う変更(新しい検査関数2件の追加)のため、他の§同様、最終的なpytest全件実行の確認はreal CIに委ねる。本件の修正に用いた`rsa`スタブはこのセッションの一時ファイル(`/tmp`配下)のみに存在し、リポジトリには一切コミットしていない。
+
+**real CIでの最終検証**: `ab76a68`のpush後、両ワークフロー(`Sanctuary CI/CD`・`Anjo da máquina Protocol - Angels`)を具体的なrun IDのポーリングで完了まで待ち、両方とも`conclusion: success`であることを確認した(失敗コメント0件)。real CI環境では`rsa`パッケージが正常にインストールされるため、ローカルで使った一時的なダミースタブは一切使われず、本物の`maquina_gatekeeper.py`を通した検証となっている。
