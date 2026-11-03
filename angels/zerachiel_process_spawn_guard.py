@@ -31,18 +31,25 @@ NAME = "ゼラキエルの産まれの検問 (Zerachiel's Birth-Watch - 深層�
 # 登録し、封鎖状態で既知のプロセス生成迂回経路(`os.fork()`)を実際に
 # 発火させて、正しく遮断されることを継続的に検証する回帰連戦である。
 #
-# [正直な注記: 本検査の限界] (1) 本天使が検証するのは`os.fork()`という
-# 既知の具体的な経路のみであり、`os.forkpty()`は同じ修正でカバーされて
-# いるはずだが、本天使のCHECKSには直接の実行確認を含めていない
-# (子プロセス生成を伴うテストをさらに増やすことによる、CI環境での
-# プロセス管理上の複雑さ・不安定化のリスクを避けるため、意図的に
-# `os.fork()`一本に絞った最小限の実証に留めている――これは将来、
-# `os.forkpty()`個別の直接検証を追加する余地が残っていることを正直に
-# 記す)。(2) 本天使が検証する深層保護は、本リポジトリ全体のゼロ
-# トラストアーキテクチャの一層(defense in depth)に過ぎず、唯一の
-# 防衛線ではない――Docker等によるOSレベルのプロセス・ネットワーク隔離
-# が一次防衛線であることは、`cassiels_veil`関連の既存のGRIMOIRE記述が
-# 既に明記している前提と同じである。
+# [正直な注記: 本検査の限界] 本天使が検証する深層保護は、本リポジトリ
+# 全体のゼロトラストアーキテクチャの一層(defense in depth)に過ぎず、
+# 唯一の防衛線ではない――Docker等によるOSレベルのプロセス・ネットワーク
+# 隔離が一次防衛線であることは、`cassiels_veil`関連の既存のGRIMOIRE
+# 記述が既に明記している前提と同じである。
+#
+# [新設 2026-11・上記(1)の正直な注記で残していた課題への対応] 以前の
+# 版の本コメントでは、「`os.forkpty()`は`os.fork()`と同じ修正でカバー
+# されているはずだが、本天使には直接の実行確認を含めていない」ことを
+# 課題として明示的に残していた。本件を実際に実機で直接検証したところ
+# (封鎖中の`os.forkpty()`実行・非封鎖時の`os.forkpty()`実行の両方)、
+# 想定どおり`os.fork()`と全く同じ経路で正しく遮断・正しく許可される
+# ことを確認した――これは新たな欠陥の発見ではなく、以前から正直に
+# 「未検証」と記していた前提が、実際に検証した結果、その通りだったと
+# いう確認である。CI環境でのプロセス管理上の複雑さを避けるため
+# `os.fork()`一本に絞っていた設計判断自体は維持しつつ、`os.forkpty()`
+# の直接検証を追加することによる不安定化リスクは、`os.fork()`版と
+# 同じ手法(即時`os._exit(0)`・事前flush)を用いることで実際には
+# 生じないことも、実機で確認済みである。
 
 sys.path.insert(0, str(ROOT))
 
@@ -97,9 +104,60 @@ def _check_fork_is_allowed_when_unsealed() -> tuple:
         return False, "封鎖していないのにos.fork()が誤って遮断された"
 
 
+def _check_forkpty_is_blocked_while_sealed() -> tuple:
+    """[新設 2026-11] 封鎖中にos.forkpty()が正しく遮断されるかを確認
+    する(os.fork()とは別のaudit eventを発火する、別の具体的なAPI)。
+    戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    mg.set_sanctuary_sealed(True)
+    try:
+        pid, master_fd = os.forkpty()
+        if pid == 0:
+            # [正直な注記] os.fork()版と同じ理由により、ここに処理が
+            # 渡った時点で既に本検査は失敗している。子プロセスの二重
+            # 動作を避けるため即座に終了させる。
+            sys.stdout.flush()
+            os._exit(0)
+        else:
+            os.waitpid(pid, 0)
+            os.close(master_fd)
+        return False, "封鎖中にos.forkpty()によるプロセス生成が遮断されなかった"
+    except mg.LossOfAtaraxia:
+        return True, "OK"
+    finally:
+        mg.set_sanctuary_sealed(False)
+
+
+def _check_forkpty_is_allowed_when_unsealed() -> tuple:
+    """[新設 2026-11・誤検知防止] 封鎖していない通常時は、os.forkpty()
+    が誤って遮断されないかを確認する。戻り値: (success: bool, detail: str)"""
+    import maquina_gatekeeper as mg
+
+    mg._register_audit_hook_once()
+    if mg.is_sanctuary_sealed():
+        return False, "前提条件の異常: 検査開始時点で既に封鎖状態になっている"
+    try:
+        pid, master_fd = os.forkpty()
+        if pid == 0:
+            sys.stdout.flush()
+            os._exit(0)
+        else:
+            _, status = os.waitpid(pid, 0)
+            os.close(master_fd)
+            if not (os.WIFEXITED(status) and os.WEXITSTATUS(status) == 0):
+                return False, "子プロセスが正常終了しなかった(forkpty自体の異常)"
+        return True, "OK"
+    except mg.LossOfAtaraxia:
+        return False, "封鎖していないのにos.forkpty()が誤って遮断された"
+
+
 CHECKS = [
     ("maquina_gatekeeper.ultimate_audit_hook: os.fork遮断", _check_fork_is_blocked_while_sealed),
     ("maquina_gatekeeper.ultimate_audit_hook: 非封鎖時の誤検知防止", _check_fork_is_allowed_when_unsealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: os.forkpty遮断", _check_forkpty_is_blocked_while_sealed),
+    ("maquina_gatekeeper.ultimate_audit_hook: os.forkpty非封鎖時の誤検知防止", _check_forkpty_is_allowed_when_unsealed),
 ]
 
 
@@ -144,8 +202,9 @@ def main():
 
     report_pass(
         NAME,
-        "封鎖中のos.fork()によるプロセス生成が正しく遮断され、かつ"
-        "非封鎖時には誤って遮断されないことを確認しました。",
+        "封鎖中のos.fork()・os.forkpty()によるプロセス生成がいずれも"
+        "正しく遮断され、かつ非封鎖時には誤って遮断されないことを"
+        "確認しました。",
     )
 
 
