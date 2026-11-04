@@ -97,13 +97,43 @@ append-onlyなJSONLインシデントログ、書き込み前の秘密情報reda
 
 ### E章: AIDD中の遵守の多角検証
 
-8つの検証角度のうち4つを実装済み: `parrhesia/verify/action_log.py`
-(HMAC-SHA256鍵付きハッシュチェーンによる行動記録の整合性検証)、
-`parrhesia/verify/knowledge_challenge.py`(SHA256等の知識挑戦)、
-`parrhesia/verify/statistics.py`(統計的な違和感の弱信号検知。severity
-は常に"suspicious_signal"に固定)、`parrhesia/verify/specificity.py`
-(主張の具体性スコア)。残り4角度(別モデルの抽き取り審査、カナリア
-注入、独立再実行、人間の抽き取り審査)は未着手。
+**[2026-11-04 更新] 8つの検証角度すべてを実装済み。**
+
+既存の4角度: `parrhesia/verify/action_log.py`(HMAC-SHA256鍵付きハッシュ
+チェーンによる行動記録の整合性検証)、`parrhesia/verify/knowledge_challenge.py`
+(SHA256等の知識挑戦)、`parrhesia/verify/statistics.py`(統計的な違和感の
+弱信号検知。severityは常に"suspicious_signal"に固定)、
+`parrhesia/verify/specificity.py`(主張の具体性スコア)。
+
+新規実装した残り4角度:
+- `parrhesia/verify/independent_rerun.py`(独立した再実行。呼び出し側が
+  渡した検証コマンド(subprocessコマンド列または呼び出し可能オブジェクト)
+  を実際にここで再実行し、主張されたclaimed_outcomeと完全一致するかを
+  機械的に比較する。不一致は決定的な矛盾として扱う)。
+- `parrhesia/verify/canary_injection.py`(仕込みへの反応。対象ファイルを
+  一時的に既知の欠陥版へ差し替え、検証コマンドが欠陥を検出するか
+  (detected)を確認し、終了後は必ず元の内容に復元する。見逃し
+  (detected=False)は決定的な矛盾として扱う)。
+- `parrhesia/verify/cross_model_review.py`(別モデルの抽き取り審査。
+  実際の別モデル呼び出しは呼び出し側の責務として残し、本モジュールは
+  既存の弱信号(statistics/specificity)に基づく審査対象の選定と、
+  審査リクエスト・判定結果の記録のみを提供する)。
+- `parrhesia/verify/human_spotcheck.py`(人間の抽き取り審査。
+  cross_model_reviewの型(ReviewRequest/ReviewVerdict)を再利用し、
+  乱数シード固定による再現可能な無作為抽き取りロジックのみを追加する)。
+
+[確認できなかったこと・正直な注記として引き続き残る限界] 上記4モジュール
+はいずれも「検証コマンドをどう組み立てるか」「別モデル・人間を実際に
+どう呼ぶか」を呼び出し側(具体的なAIDD作業)の責務として残す骨格で
+あり、E章全体が「枠組みの提供」に留まる点は変わっていない。実際の
+AIDD作業へ8角度すべてを接続する統合作業(具体的な検証コマンド・
+隔離実行環境・実モデル呼び出しの用意)は別途必要。
+
+単体テスト: `tests/test_parrhesia_verify_remaining_angles.py`(16件、
+canary_injectionについては「検証コマンドが欠陥を正しく検出する場合」
+と「見せかけの検証が欠陥を見逃す場合」の両方を実際にファイルへ欠陥を
+注入して確認済み)。既存の`tests/test_parrhesia_verify.py`(16件)を含む
+Parrhesia全テスト206件、回帰ゼロを確認。
 
 ### F章・A章
 
@@ -119,5 +149,12 @@ append-onlyなJSONLインシデントログ、書き込み前の秘密情報reda
   振る舞いを変えるものではない)。
 - 全ての変更は、branch → merge --no-ff → main → push → 実機GitHub
   Actions CIでの確認、という既存の規律をそのまま継続している。
-- Dockerによる隔離実行の必須化(require_docker_sandbox)に関する項目は、
-  E章(AIDD時の遵守検証)に含まれるため、まだ着手していない。
+- Dockerによる隔離実行の必須化(`src/aegis_system.py`の
+  `require_docker_sandbox`、`angels/guard_docker_sandbox_enforcement_decay.py`
+  が監査)自体はAegisSystem/sandalphon_jail側の既存機能であり、Parrhesia
+  側の対応は「E章のindependent_rerun/canary_injectionが、呼び出し側から
+  Docker隔離実行のラッパーをcommandとして渡せる形になっているか」に
+  限定される。[2026-11-04 更新] この2モジュールは特定の隔離実行機構に
+  依存しない汎用設計で実装済みだが、実際に`sandalphon_jail.run_in_sandalphon`
+  をcommandとして接続する統合作業自体はまだ行っていない(E章全体が
+  「枠組みの提供」に留まる、という上記の限界と同根)。
