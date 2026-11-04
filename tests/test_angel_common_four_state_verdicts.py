@@ -5,10 +5,10 @@ tests/test_angel_common_four_state_verdicts.py
 
 以前の angels/_common.py には report_pass / report_fail の2値しか無く、
 「検査対象が存在しない」(NOT_APPLICABLE) ケースを report_pass で代用して
-いた angels/*.py が9ファイル存在した(azazel_dependency_audit.py,
-heavenly_tablets_zkp.py, metatron_cube_hsm.py, metatron_revelation_mcp.py,
-ophanim_thousand_eyes.py, sandalphon_echo.py, sariel_fallen_auditor.py,
-shamir_seal.py, uriel_nonce.py)。これはCI上では「全て検査してPASSした」
+いた angels/*.py が9ファイル存在した(audit_dependency_cve.py,
+check_zkp_audit_export_status.py, check_hardware_certificate_schema.py, audit_autorule_approval_gate.py,
+guard_html_external_script_injection.py, audit_log_format_integrity.py, audit_adapters_static_analysis.py,
+check_certificate_expiry.py, guard_audit_log_replay.py)。これはCI上では「全て検査してPASSした」
 ように見えるが、実際には何も検査していない、見せかけの緑だった。
 
 本テストは、(1) 新設した report_inconclusive / report_not_applicable が
@@ -18,7 +18,7 @@ sys.exit()する設計だったが、.github/workflows/anjo_da_maquina_protocol.
 の各天使ステップにcontinue-on-errorが存在せず、非ゼロ終了コードはどれも
 CIジョブ全体を失敗させてしまうため、通常運用を壊さないよう無修正のまま
 sys.exit(1)するFAILとは区別して正常終了するよう設計変更した)、
-(3) 実際に9ファイルのうち代表例(heavenly_tablets_zkp.py, uriel_nonce.py)
+(3) 実際に9ファイルのうち代表例(check_zkp_audit_export_status.py, guard_audit_log_replay.py)
 が、検査対象が存在しない状態で report_pass ではなく
 report_not_applicable を呼ぶことを、実機の挙動で固定する。
 """
@@ -78,13 +78,13 @@ def test_evidence_kwarg_is_printed_when_given():
     assert "checked_path" in buf.getvalue()
 
 
-def test_heavenly_tablets_zkp_reports_not_applicable_when_trail_missing(tmp_path, monkeypatch):
+def test_check_zkp_audit_export_status_reports_not_applicable_when_trail_missing(tmp_path, monkeypatch):
     """[§BO核心] zk_audit_trail.jsonが存在しない場合、
     以前はreport_passで「検査対象なし」をPASSと誤報告していた。
     修正後はreport_not_applicableを呼び、CIは落とさず(exit 0)かつ
     PASSとは区別可能な行を出力することを、実機の挙動で固定する。"""
     import importlib
-    import heavenly_tablets_zkp as htz
+    import check_zkp_audit_export_status as htz
     importlib.reload(htz)
     monkeypatch.setattr(htz, "ROOT", tmp_path)
 
@@ -96,11 +96,11 @@ def test_heavenly_tablets_zkp_reports_not_applicable_when_trail_missing(tmp_path
     assert "✅ PASS" not in out
 
 
-def test_uriel_nonce_reports_not_applicable_when_chain_missing(tmp_path, monkeypatch):
+def test_guard_audit_log_replay_reports_not_applicable_when_chain_missing(tmp_path, monkeypatch):
     """[§BO核心] 監査チェーンが未生成の場合、以前はPASSと誤報告していた。
     修正後はNOT_APPLICABLEを出力し、CIは落とさない。"""
     import importlib
-    import uriel_nonce as un
+    import guard_audit_log_replay as un
     importlib.reload(un)
     monkeypatch.setattr(un, "ROOT", tmp_path)
 

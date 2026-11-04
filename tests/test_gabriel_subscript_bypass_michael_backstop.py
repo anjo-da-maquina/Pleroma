@@ -33,11 +33,11 @@ Gabrielの静的解析だけで実行を許可するのではなく、実際の�
 通りの構造が、`sefer.inquisition()`自身(教材ではなく実運用コード)にも
 具体的に当てはまることを、本テストで実機検証として固定する。
 
-[未解決の残存リスク] `angels/sariel_fallen_auditor.py`(CI上で`adapters/`
+[未解決の残存リスク] `angels/audit_adapters_static_analysis.py`(CI上で`adapters/`
 配下のスクリプトをGabrielの静的解析のみで検査する)は、この種のコードに
 対して動的実行を一切行わないため、本バイパスに対して無力である。ただし
 `adapters/`はAIが生成する未検証コードではなく保守者が書く内部ツールである
-ため、実害の想定は低いと判断し、今回は`sariel_fallen_auditor.py`自体の
+ため、実害の想定は低いと判断し、今回は`audit_adapters_static_analysis.py`自体の
 修正は行わず、この限界を正直に記録するに留める。
 """
 import sys

@@ -45,7 +45,7 @@ def report_fail(name: str, message: str, evidence: dict = None):
 #
 # [実装中の自己訂正] 当初、INCONCLUSIVE/NOT_APPLICABLEをそれぞれ専用の
 # 終了コード(2・3)でsys.exit()する設計にしていたが、実機で
-# angels/heavenly_tablets_zkp.pyを実行したところ、実際に終了コード3を
+# angels/check_zkp_audit_export_status.pyを実行したところ、実際に終了コード3を
 # 返すことを確認した。.github/workflows/anjo_da_maquina_protocol.ymlの
 # 各天使ステップには continue-on-error が一切設定されておらず、単純な
 # `run: python angels/x.py` のみである。GitHub Actionsは非ゼロ終了コード
@@ -146,7 +146,7 @@ SECRET_PATTERNS = [
 # 回帰テスト自身が、意図的に「本物らしい偽のAWSアクセスキー」(AKIAで始まる
 # 文字列)をテストフィクスチャとしてモジュールレベルの文字列に持つ
 # (tests/test_scan_for_leaked_secrets.py)
-# ことが原因で、本番のCIステップ(angels/gabriel_canary.py)がリポジトリ
+# ことが原因で、本番のCIステップ(angels/guard_precommit_secret_leak.py)がリポジトリ
 # 全体をスキャンする際に、このテストフィクスチャ自身を「本物の漏洩」と
 # 誤検知し続けていた(実機検証済み: 2026-10-10 23:29のマージ以降、この
 # ワークフロー全体が継続的に失敗していたことをGitHub Actionsの実行履歴で

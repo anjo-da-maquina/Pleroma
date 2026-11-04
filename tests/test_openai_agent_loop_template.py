@@ -3,7 +3,7 @@ tests/test_openai_agent_loop_template.py
 ==========================================
 src/openai_agent_loop.py (OpenAI拡張用テンプレート) の再構築を検証する
 回帰テスト。詳細な経緯は src/openai_agent_loop.py モジュールdocstring、
-および angels/raguel_template.py 参照。
+および angels/audit_agent_template_integration.py 参照。
 
 確認する点:
   1. モジュールのimport自体が、'openai' パッケージの有無に関わらず

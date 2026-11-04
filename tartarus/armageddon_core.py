@@ -109,7 +109,7 @@ def build_forge_script(payload_code: str, pleroma_dir: Path, tartarus_dir: Path)
     自己対戦は、実際には**防壁が一度も展開されていない空の闘技場**で
     行われていたに等しく、Luciferがどれほど単純な(難読化すら伴わない)
     攻撃を書いても常に「突破」と判定されてしまう構造的な欠陥だった。
-    これは`angels/raguel_template.py`が`src/openai_agent_loop.py`に対して
+    これは`angels/audit_agent_template_integration.py`が`src/openai_agent_loop.py`に対して
     既に検査している規約(「`with Sanctum(`を経由しないファイルI/Oは
     実防壁が外れている」)と全く同じ種類の欠陥が、検査対象側ではなく
     検査する側(Armageddon自身)に存在していたことになる。

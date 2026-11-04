@@ -25,4 +25,4 @@ zk_audit_trail.json
 zk_audit_report.xml
 remote_ledger_sync.log
 incident_report.json
-sanctuary_manifest.json
+audit_violation_log_summary.json

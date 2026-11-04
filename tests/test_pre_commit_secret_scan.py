@@ -88,11 +88,11 @@ def test_staged_private_key_pem_is_blocked():
 def test_tests_directory_fixture_is_not_blocked_but_same_content_elsewhere_still_is():
     """[脆弱性修正 2026-10 §BH/核心] `angels/_common.py`の
     `EXCLUDED_SECRET_SCAN_DIRS`には§BDで"tests"が追加され、
-    `scan_for_leaked_secrets()`(gabriel_canary.pyの実体)は`tests/`配下の
+    `scan_for_leaked_secrets()`(guard_precommit_secret_leak.pyの実体)は`tests/`配下の
     回帰テストフィクスチャ(本物らしい偽の秘密情報)を自己検知しないよう
     修正された。しかし本ファイル(pre_commit_secret_scan.py)は
     SECRET_PATTERNSのみを再利用し、EXCLUDED_SECRET_SCAN_DIRSを再利用して
-    いなかったため、CI(gabriel_canary.py)では通過する全く同じ内容の変更
+    いなかったため、CI(guard_precommit_secret_leak.py)では通過する全く同じ内容の変更
     が、pre-commit側だけでは依然としてブロックされてしまう(=このファイル
     自身のコメントが懸念していた『CIとpre-commitのズレ』が、
     EXCLUDED_SECRET_SCAN_DIRSの観点で再発していた)。`tests/`配下への同じ

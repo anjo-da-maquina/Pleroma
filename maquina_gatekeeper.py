@@ -260,7 +260,7 @@ def _register_audit_hook_once():
     # `set_sanctuary_sealed(True)`で『封鎖済み』を宣言してしまう」という、
     # フェイルオープン(安全装置の設置失敗を、安全装置が有効であるかの
     # ように握り潰して通過させる)の典型例であり、本リポジトリのゼロ
-    # トラスト思想(例: shamir_seal.pyの証明書失効時の扱い)に反する。
+    # トラスト思想(例: check_certificate_expiry.pyの証明書失効時の扱い)に反する。
     # ゼロトラストの原則に従い、設置の失敗は握り潰さずそのまま伝播させ
     # (フェイルクローズ)、`enforce_maquina_seal`/`_seal_sanctuary`の
     # 呼び出し自体を失敗させることで、「保護されていないのに保護されて

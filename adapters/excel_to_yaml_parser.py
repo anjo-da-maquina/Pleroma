@@ -26,7 +26,7 @@ openpyxlを一切使用していなかった(インストールされている�
 した。リポジトリルートに`requirements.xlsx`(1行目をヘッダ行とする表形式の
 外部要件シート)がまだ存在しない現状(外部要件シートはまだ導入されていない)
 では、他の天使スクリプトと同じ「対象が存在しない場合は正直にスキップ報告
-する」パターン(例: angels/shamir_seal.pyの証明書未発行時の扱い)に従い、
+する」パターン(例: angels/check_certificate_expiry.pyの証明書未発行時の扱い)に従い、
 検査対象なしとして正常終了する。`requirements.xlsx`が将来投入された場合は
 実際にパースし、`sefer/external_requirements.yaml`へ出力する。
 """

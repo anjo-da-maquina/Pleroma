@@ -20,12 +20,12 @@ docstring参照)、`adapters/`配下に残っていた「名前だけの検査�
 を含むリポジトリ内のどのスクリプトもPlaywrightを一切使用していなかった。
 
 本修正では、PlaywrightのヘッドレスChromiumで`architecture.html`
-(`angels/ophanim_thousand_eyes.py`が構文・外部スクリプト混入を静的に検査
+(`angels/guard_html_external_script_injection.py`が構文・外部スクリプト混入を静的に検査
 している対象と同一ファイル)を実際にレンダリングし、以下を動的に検証する
 「本物の」外部QAチェックとして実装した:
   1. ページ読み込み中にJavaScriptの未捕捉例外(pageerror)が発生しないこと。
   2. ブラウザのコンソールにerrorレベルのログが出力されないこと。
-`ophanim_thousand_eyes.py`が静的解析(ファイルの中身を読むだけ)であるのに
+`guard_html_external_script_injection.py`が静的解析(ファイルの中身を読むだけ)であるのに
 対し、本ファイルは実際にブラウザでコードを実行する動的検証であり、互いに
 補完する多層防御になっている。`architecture.html`が存在しない場合は
 「検査対象なし」として正直に報告し正常終了する(他の天使スクリプトと同じ、
