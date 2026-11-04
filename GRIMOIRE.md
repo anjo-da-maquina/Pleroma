@@ -8,6 +8,72 @@
 
 
 
+\## 0. 旧名↔新名 対応表（2026-11 命名変更）
+
+angels/ 配下の天使名スクリプトは、海外QA担当者が機能を一目で把握できるよう、
+検知対象・防止技術を表す英語名(guard\_/audit\_/check\_/hook\_ の4系統)に改名した。
+本書より下の各\#\#番号の記録は、過去の実装当時の名称のまま、一切書き換えていない。
+以下は旧名(天使名)→新名の対応表(カテゴリ順)。
+
+| 旧名 (angels/) | 新名 (angels/) | 役職 | 役割 |
+|---|---|---|---|
+| `uriel_nonce.py` | `guard_audit_log_replay.py` | Warden | Audit log replay detector |
+| `sandalphon_anchor.py` | `guard_audit_log_rollback.py` | Vanguard | Audit log tamper-detection anchor |
+| `haniel_truncation_guard.py` | `guard_audit_log_truncation.py` | Sentinel | Audit-trail truncation-attack detector |
+| `nuriel_capability_strip_guard.py` | `guard_container_capabilities.py` | Blademaster | Docker sandbox capability-drop verifier |
+| `chamuel_dlsym_guard.py` | `guard_ctypes_dlsym_bypass.py` | Sentinel | ctypes dlopen/dlsym bypass tester |
+| `sandalphon_decree.py` | `guard_docker_sandbox_enforcement_decay.py` | Sentinel | Docker sandbox enforcement regression guard |
+| `jerahmeel_fail_open_guard.py` | `guard_fail_open_exception.py` | Blademaster | Silent exception-swallow disclosure check |
+| `firmament_enclave_tee.py` | `guard_hardcoded_secret_leak.py` | Vanguard | Hardcoded secret-key leak scanner |
+| `ophanim_thousand_eyes.py` | `guard_html_external_script_injection.py` | Warden | External script loader detector |
+| `sachiel_kernel_transfer_guard.py` | `guard_kernel_socket_transfer.py` | Warden | Sandbox fd-transfer bypass tester |
+| `sealtiel_mmap_guard.py` | `guard_mmap_write_bypass.py` | Blademaster | mmap write-bypass regression guard |
+| `jegudiel_exfiltration_guard.py` | `guard_network_exfiltration.py` | Vanguard | Connection-less data/DNS exfiltration blocker |
+| `camael_shield.py` | `guard_obfuscated_payload_bypass.py` | Blademaster | Obfuscated payload bypass tester |
+| `gabriel_canary.py` | `guard_precommit_secret_leak.py` | Blademaster | Secret leak & pre-commit wiring check |
+| `zerachiel_process_spawn_guard.py` | `guard_process_spawn.py` | Bulwark | Process-spawn bypass regression guard |
+| `phanuel_rejection_memory_guard.py` | `guard_rejection_memory.py` | Sentinel | Proposal re-submission regression test |
+| `michael_sword.py` | `guard_sandbox_core_attack_battery.py` | Warden | Core sandbox attack tester |
+| `lucifer_rebellion.py` | `guard_sandbox_shell_eval_bypass.py` | Blademaster | Sandbox shell-escape attack tester |
+| `dominions_syscall_guard.py` | `guard_seccomp_syscall.py` | Sentinel | Seccomp syscall sandbox verifier |
+| `zadkiel_shield_decree.py` | `guard_shield_rule_autoapply_and_key_leak.py` | Warden | LLM-rule approval & key-hygiene guard |
+| `hadraniel_socket_send_guard.py` | `guard_socket_send_bypass.py` | Sentinel | Pre-connected socket exfiltration blocker |
+| `orifiel_supply_chain_guard.py` | `guard_undeclared_dependency.py` | Bulwark | Dependency declaration consistency auditor |
+| `hanael_path_join_guard.py` | `guard_unvalidated_path_join.py` | Sentinel | Unvalidated path-join detector |
+| `sariel_fallen_auditor.py` | `audit_adapters_static_analysis.py` | Loremaster | External adapter static-analysis auditor |
+| `raguel_template.py` | `audit_agent_template_integration.py` | Scribe | Template security integration checker |
+| `metatron_revelation_mcp.py` | `audit_autorule_approval_gate.py` | Scribe | Auto-rule human-approval gate audit |
+| `enochian_oracle.py` | `audit_banned_events_baseline.py` | Archivist | Banned-events baseline integrity audit |
+| `jophiel_semantic.py` | `audit_blocklist_regression.py` | Cartographer | Forbidden-list weakening detector |
+| `azazel_dependency_audit.py` | `audit_dependency_cve.py` | Loremaster | Dependency CVE audit |
+| `ophanim_eye.py` | `audit_dependency_version_pinning.py` | Loremaster | Requirements pin auditor |
+| `seraphim_consensus.py` | `audit_detection_layer_consensus.py` | Scribe | Defense-in-depth consensus auditor |
+| `raziel_auditor.py` | `audit_ledger_schema.py` | Cartographer | Ledger schema integrity auditor |
+| `sandalphon_echo.py` | `audit_log_format_integrity.py` | Cartographer | Audit log format validator |
+| `metatron_scripture_seal.py` | `audit_package_boundary_isolation.py` | Archivist | Public package boundary audit |
+| `thrones_positive_path.py` | `audit_security_flag_test_coverage.py` | Scribe | Security flag test-coverage auditor |
+| `zadkiel_astrolabe.py` | `audit_signed_chain_integrity.py` | Loremaster | Audit chain integrity verifier |
+| `sanctuary_manifest.py` | `audit_violation_log_summary.py` | Loremaster | Audit log summary generator |
+| `cherubim_ebpf_guard.py` | `check_audit_hook_active.py` | Surveyor | Audit-hook liveness check |
+| `shamir_seal.py` | `check_certificate_expiry.py` | Mechanic | Certificate expiry health check |
+| `ariel_vigilant_watch.py` | `check_ci_step_disabled.py` | Surveyor | CI step/job disablement detector |
+| `principalities_e2e.py` | `check_core_module_integration.py` | Technician | Core module smoke test |
+| `raguel_scale.py` | `check_disk_and_log_capacity.py` | Inspector | Disk space and log size monitor |
+| `remiel_equivalence_battery.py` | `check_equivalent_syntax_bypass.py` | Inspector | Blocklist evasion regression battery |
+| `metatron_cube_hsm.py` | `check_hardware_certificate_schema.py` | Mechanic | Hardware certificate schema check |
+| `barachiel_last_words.py` | `check_log_flush_before_exit.py` | Surveyor | Unflushed exit log-loss detector |
+| `alpha_omega_guard.py` | `check_required_ci_steps_present.py` | Mechanic | Required CI step removal detector |
+| `raphael_remediation.py` | `check_source_syntax_validity.py` | Surveyor | Source syntax validator |
+| `virtues_load.py` | `check_static_analysis_performance.py` | Technician | Static analyzer performance check |
+| `heavenly_tablets_zkp.py` | `check_zkp_audit_export_status.py` | Inspector | ZKP audit export validity gate |
+| `seven_trumpets_ledger.py` | `hook_ci_failure_chain_log.py` | Clerk | CI failure event logger |
+| `gehenna_void_entropy.py` | `hook_ci_failure_incident_report.py` | Steward | CI failure incident recorder |
+| `dies_irae.py` | `hook_incident_kill_switch_flag.py` | Courier | Kill-switch recommendation recorder |
+| `azrael_scythe_slashing.py` | `hook_incident_severity_annotation.py` | Custodian | Incident severity annotator |
+| `ataraxia_throne.py` | `hook_pycache_cleanup.py` | Clerk | Pycache cleanup utility |
+| `metatron_commitment.py` | `hook_test_suite_hash_log.py` | Clerk | Test-suite change tamper log |
+
+
 \## 1. 全体像（The Trinity Architecture）
 
 システムは大きく3つの領域に分かれている。

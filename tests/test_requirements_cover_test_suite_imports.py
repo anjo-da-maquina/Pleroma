@@ -9,7 +9,7 @@ requirements.txt の回帰テスト。GRIMOIRE.md §AP 参照。
 その直後に `pytest tests/ -v -s` を実行する。
 
 本セッション中、`tests/test_adapters_excel_to_yaml_parser.py`(PyYAML・
-openpyxlが必要)と`tests/test_sandalphon_anchor_state_persistence.py`
+openpyxlが必要)と`tests/test_guard_audit_log_rollback_state_persistence.py`
 (PyYAMLが必要)を追加した際、requirements.txtへの追記が漏れたまま
 マージされていた。この2ファイルは、このサンドボックス環境には元から
 PyYAML・openpyxlがプリインストールされていたため、ローカルでは問題なく
@@ -52,7 +52,7 @@ def _local_module_names() -> set:
         names.add(p.stem)
     # リポジトリルート直下のパッケージディレクトリ(例: anjo_interceptor/)、
     # および sys.path.insert 経由でモジュール単体としてimportされる
-    # サブディレクトリ配下の .py ファイル(例: angels/sandalphon_anchor.py)。
+    # サブディレクトリ配下の .py ファイル(例: angels/guard_audit_log_rollback.py)。
     for d in LOCAL_MODULE_DIRS:
         dir_path = ROOT / d
         if not dir_path.is_dir():

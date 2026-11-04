@@ -13,7 +13,7 @@ src/deadmans_switch.pyのCollarProtocol._commit_suicide()で実機
 箇所も探す」という§11.9の運用ルール)によって判明した。
 
 本テストファイル自体も、角化(§BPの座天使)の検査範囲外(環境変数ゲートでは
-なく、ファイルのmtime経過時間がゲートであるため、thrones_positive_path.py
+なく、ファイルのmtime経過時間がゲートであるため、audit_security_flag_test_coverage.py
 の正直に開示された検出範囲の外)だったため、専用テストが一件も存在して
 いなかった、§BM/§BN/§BP/§BQ系列の未発見の追加インスタンスでもある。
 

@@ -1,11 +1,11 @@
 """
 [脆弱性修正 2026-10 §BC] 「天使(angels/*.py)の配線漏れ」の回帰テスト。
 
-`angels/metatron_scripture_seal.py`は、「ライセンス証明書機構(maquina_gatekeeper)
+`angels/audit_package_boundary_isolation.py`は、「ライセンス証明書機構(maquina_gatekeeper)
 の公開配布からの分離」を静的に検証する正しいロジックを持つスクリプトとして
 実在していたが、どのCIワークフローファイルのrun:ステップからも一度も呼び出
 されておらず、GRIMOIRE.mdの解説文の中だけに「配線されている」と記述されて
-いた。実機検証: `grep -rl metatron_scripture_seal . --include="*.py"
+いた。実機検証: `grep -rl audit_package_boundary_isolation . --include="*.py"
 --include="*.yml" --include="*.md"`でGRIMOIRE.md以外に一件もヒットしないこと
 を確認した。
 
@@ -88,12 +88,12 @@ def test_every_angels_script_is_referenced_by_some_ci_workflow():
     )
 
 
-def test_metatron_scripture_seal_is_specifically_wired_in():
+def test_audit_package_boundary_isolation_is_specifically_wired_in():
     """[回帰防止・具体例] 本件で実際に見つかった欠落ファイルを名指しで
     固定する。将来この特定のファイルが再び外れた場合にも、上の汎用テスト
     だけでなくここでも検知できるようにする。"""
     referenced = _collect_referenced_angel_scripts()
-    assert "metatron_scripture_seal.py" in referenced
+    assert "audit_package_boundary_isolation.py" in referenced
 
 
 def test_step_disabled_via_literal_if_false_is_not_counted_as_wired(monkeypatch, tmp_path):
@@ -115,12 +115,12 @@ def test_step_disabled_via_literal_if_false_is_not_counted_as_wired(monkeypatch,
         "    steps:\n"
         "      - name: sabotaged step\n"
         "        if: false\n"
-        "        run: python angels/barachiel_last_words.py\n",
+        "        run: python angels/check_log_flush_before_exit.py\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(self_mod, "WORKFLOWS_DIR", wf_dir)
     referenced = self_mod._collect_referenced_angel_scripts()
-    assert "barachiel_last_words.py" not in referenced, (
+    assert "check_log_flush_before_exit.py" not in referenced, (
         "if: false で無効化されたステップが、配線済みとして誤って検知されている。"
     )
 
@@ -139,9 +139,9 @@ def test_step_with_normal_condition_is_still_counted_as_wired(monkeypatch, tmp_p
         "    steps:\n"
         "      - name: normal step\n"
         "        if: success()\n"
-        "        run: python angels/barachiel_last_words.py\n",
+        "        run: python angels/check_log_flush_before_exit.py\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(self_mod, "WORKFLOWS_DIR", wf_dir)
     referenced = self_mod._collect_referenced_angel_scripts()
-    assert "barachiel_last_words.py" in referenced
+    assert "check_log_flush_before_exit.py" in referenced

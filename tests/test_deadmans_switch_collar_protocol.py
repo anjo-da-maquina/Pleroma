@@ -3,14 +3,14 @@ tests/test_deadmans_switch_collar_protocol.py
 ================================================
 [脆弱性修正 2026-10 §BP] src/deadmans_switch.py の回帰テスト。
 
-angels/thrones_positive_path.py(新設、§BP)による機械的な洗い出しで、
+angels/audit_security_flag_test_coverage.py(新設、§BP)による機械的な洗い出しで、
 `src/deadmans_switch.py`のCollarProtocol.verify_collar()が、環境変数
 ANJO_COLLAR_SEALによって「正常稼働を継続する」か「os._exit(1)で即時
 自壊する」かが切り替わる、セキュリティ上最も重要な分岐(ミュトス級AIの
 封じ込め機構そのもの)でありながら、どのテストファイルにも一件も
 言及されていないことが判明した。
 
-これは§BM(CHAOS_MODE)・§BN(HMAC連鎖)・§BP(shamir_seal.py)と全く同じ
+これは§BM(CHAOS_MODE)・§BN(HMAC連鎖)・§BP(check_certificate_expiry.py)と全く同じ
 構造の、未発見の4件目である。_commit_suicide()はtry-exceptでも捕捉
 できない`os._exit(1)`を使う設計(docstringに明記された意図的な仕様)
 のため、同一プロセス内のpytestから直接呼ぶとテストランナー自体が

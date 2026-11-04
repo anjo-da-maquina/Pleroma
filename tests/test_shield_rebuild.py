@@ -3,7 +3,7 @@ tests/test_shield_rebuild.py
 ==============================
 src/angelic_shield.py / src/kamael_judgment.py の再構築(2026-10)を検証する
 回帰テスト。詳細な経緯は両モジュールのdocstring、および
-angels/zadkiel_shield_decree.py 参照。
+angels/guard_shield_rule_autoapply_and_key_leak.py 参照。
 
 確認する点:
   1. ZadkielDominion.propose_knowledge() が、LLM生出力を即時に

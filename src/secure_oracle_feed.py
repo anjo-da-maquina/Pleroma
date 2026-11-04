@@ -28,7 +28,7 @@ class EconomicDefenseLimiter:
     名乗っているにもかかわらず、実際には「このプロセス1回の実行あたりの
     上限」でしかなく、スクリプトを(手動・cron・CIいずれであれ)再実行
     するたびにカウントが0から再始動する、という構造的欠陥だった。
-    GRIMOIRE.md §AH(ZKAuditTrail)・§AN(sandalphon_anchor)と同種の
+    GRIMOIRE.md §AH(ZKAuditTrail)・§AN(guard_audit_log_rollback)と同種の
     「プロセスグローバル/インスタンス変数が実行ごとにリセットされ、
     名乗っている保護が実質的に機能しない」パターンである。
 

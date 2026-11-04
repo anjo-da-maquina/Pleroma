@@ -15,7 +15,7 @@ git config core.hooksPath hooks
 これにより、AWSキー・GitHub/OpenAIトークン・PEM秘密鍵等のパターンがステージされた
 変更の\*追加行\*に含まれている場合、`git commit` 自体がブロックされるようになる
 （検知ロジックは `tools/pre_commit_secret_scan.py`、CI時の全リポジトリ走査は
-`angels/gabriel_canary.py` が別途担う）。
+`angels/guard_precommit_secret_leak.py` が別途担う）。
 
 ## ⚔️ 闘争と進化（アリーナ運用）
 闘技場を起動し、ルシファー（攻撃AI・堕天使）とメタトロン（防衛・QA）を3戦戦わせる。
@@ -65,8 +65,8 @@ python -B -m pytest -p no:cacheprovider --assert=plain tests/ -v
 ## 👼 天使（angels/）の個別実行
 CIが実行する約30件の実質的な検査スクリプトを、ローカルで個別に実行して確認できる。
 ```
-python angels/michael_sword.py
-python angels/gabriel_canary.py
+python angels/guard_sandbox_core_attack_battery.py
+python angels/guard_precommit_secret_leak.py
 # ... 他 angels/*.py も同様
 ```
 

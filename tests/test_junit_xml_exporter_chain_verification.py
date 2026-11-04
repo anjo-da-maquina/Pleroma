@@ -11,7 +11,7 @@ CI/CDダッシュボードはこのJUnit XMLの内容だけを見るため、根
 
 本テストは、(1) 改ざんされていない正当な連鎖はfailures="0"のまま
 であること、(2) 改ざんされた連鎖は実際にfailures="1"かつ<failure>要素
-で検知されること、(3) angels/heavenly_tablets_zkp.py側もこれを読んで
+で検知されること、(3) angels/check_zkp_audit_export_status.py側もこれを読んで
 CI自体を失敗させること、を固定する。
 
 実運用の`rsa`パッケージ(PyPI配布)は、本テストを実行するサンドボックス
@@ -140,8 +140,8 @@ def test_tampered_chain_is_detected_and_reported_as_failure(tmp_path, monkeypatc
     assert len(failure_testcases) == 1
 
 
-def test_heavenly_tablets_zkp_fails_ci_when_chain_is_tampered(tmp_path, monkeypatch):
-    """[統合] angels/heavenly_tablets_zkp.py自身も、エクスポートされた
+def test_check_zkp_audit_export_status_fails_ci_when_chain_is_tampered(tmp_path, monkeypatch):
+    """[統合] angels/check_zkp_audit_export_status.py自身も、エクスポートされた
     JUnit XMLのfailures属性を見てCI自体を失敗させること(ダッシュボード
     だけに判定を委ねない)。"""
     trail_file, key_file = _build_valid_chain(tmp_path, monkeypatch, n=2)
@@ -149,7 +149,7 @@ def test_heavenly_tablets_zkp_fails_ci_when_chain_is_tampered(tmp_path, monkeypa
     trail[0]["action"] = "TAMPERED_ACTION"
     trail_file.write_text(json.dumps(trail), encoding="utf-8")
 
-    import heavenly_tablets_zkp as htz
+    import check_zkp_audit_export_status as htz
     import importlib
     importlib.reload(htz)
     monkeypatch.setattr(htz, "ROOT", tmp_path)

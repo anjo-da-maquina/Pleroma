@@ -10,7 +10,7 @@ shield_rules_pending.json
 provisioning_pending.json
 .angel_state/
 incident_report.json
-sanctuary_manifest.json
+audit_violation_log_summary.json
 zk_audit_trail.json
 zk_audit_report.xml
 # [2026-10] Michael(sefer._log_violation_to_chain)が実際に遮断したイベントを

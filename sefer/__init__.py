@@ -203,7 +203,7 @@ VALID_EVENT_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9
 # イベント(`sefer/raziel_ledger.json`の`banned_events`)は、これまで
 # `_michael_absolute_defense`から一切読み込まれておらず、承認してもシステム
 # の実際の防御には何ら反映されない「学習したつもりになっているだけ」の状態
-# だった(`angels/raziel_auditor.py`はファイルのスキーマ検証のみで、実際に
+# だった(`angels/audit_ledger_schema.py`はファイルのスキーマ検証のみで、実際に
 # 読み込まれ enforce されているかは検証していなかった)。
 #
 # [設計上の制約・安全性の確認] 本番の`sefer/raziel_ledger.json`には既定で
@@ -467,7 +467,7 @@ def _load_dynamic_shield_rules() -> tuple:
     外部脅威インテリジェンス(`shield_rules.json`の`blocked_modules`/
     `blocked_functions`)は、これまでGabriel(`inquisition()`)から一切
     読み込まれておらず、承認してもシステムの実際の検閲には何ら反映されない
-    「学習したつもりになっているだけ」の状態だった(`angels/zadkiel_shield_decree.py`
+    「学習したつもりになっているだけ」の状態だった(`angels/guard_shield_rule_autoapply_and_key_leak.py`
     は承認ワークフロー自体の構造検証のみで、実際にenforceされているかは
     検証していなかった。`sefer/raziel_ledger.json`がMichael側から一切
     読まれていなかった件と同種の欠陥。本ファイル内の対になる修正も参照)。
@@ -755,7 +755,7 @@ def _guarded_os_copy_file_range(src, dst, count, offset_src=None, offset_dst=Non
 # `socket.sendmsg`は、いずれも別個の、ちゃんと存在するeventである――
 # `send`/`sendall`はそれらとは違い、そもそもイベント自体が無い)。
 #
-# `angels/jegudiel_exfiltration_guard.py`の§CA時点のコメントは、
+# `angels/guard_network_exfiltration.py`の§CA時点のコメントは、
 # 「TCP経由のsend/sendallは専用eventを持たないが、必ず事前のconnectを
 # 要する(=forbidden集合で遮断済み)ため検査不要」と判断していた。しかし
 # これは、§CN・§CD等で繰り返し発見している「Sanctum起動**前**に確保した
