@@ -135,11 +135,63 @@ canary_injectionについては「検証コマンドが欠陥を正しく検出�
 注入して確認済み)。既存の`tests/test_parrhesia_verify.py`(16件)を含む
 Parrhesia全テスト206件、回帰ゼロを確認。
 
-### F章・A章
+### A章: 第三者リポジトリ監査ランナー
 
-未着手(F章: 自己試験ハーネス。A章: 第三者リポジトリ監査ランナー
-`parrhesia audit <target>` — 当初の指示書のPhase 0だが、安城さんの
-明示的な優先度決定により後回し)。
+**[2026-11-04 実装完了]** `parrhesia audit <target>`(当初の指示書の
+Phase 0。安城さんの優先度決定により最後に着手)。
+
+[範囲の確認] 元の指示書の詳細(Phase 0の具体的な監査項目)を持っていな
+かったため、`AskUserQuestion`で範囲を確認し、「全部」(以下3つすべて)
+という回答を得た:
+
+1. **コミット履行の整合性** — `parrhesia/audit.py`の`audit_commit`が、
+   対象リポジトリの各コミットの実diffに対して既存の
+   `parrhesia.diff_fraud.analyze_diff`(テスト削除・スキップ追加・
+   アサーション弱体化・終了コード固定・例外握り潰しの5パターン検出)
+   を適用する。
+2. **AIDD契約遵守の痕跡** — `detect_compliance_trace`が、対象リポジトリ
+   に`.parrhesia/`配下のParrhesia形式の行動記録・契約ファイルが存在する
+   かを確認する。見つからないことは不正の証拠として扱わない(対象が
+   単にParrhesiaを導入していないだけの可能性が高いため)。
+3. **総合レポート** — `render_report`が、`parrhesia.report`と同じ
+   「検証を通った実際の結果だけから機械的に組み立てる」原則で、上記
+   1・2を1つの固定書式レポートにまとめる。
+
+CLIエントリーポイント: `parrhesia/cli.py`(`python -m parrhesia.cli audit
+<target> [--max-commits N]`)。`pyproject.toml`の`[project.scripts]`への
+登録は見送った(本リポジトリのパッケージ名自体が`sefer`であり、別の
+配布物の設定を同じ`pyproject.toml`に混在させることの影響範囲が未調査
+なため — `OUT_OF_SCOPE_RENAME_PROPOSAL.md`で指摘した`sefer`のPyPI配布名
+問題と同種のリスクのため、慎重に見送った)。
+
+[読み取り専用の原則] `_run_readonly_git`が、`log`/`show`以外のgit
+サブコマンドを渡された場合にValueErrorとすることで、「対象リポジトリ
+を一切変更しない」という原則をコードレベルで強制している(実機テスト
+`test_readonly_git_rejects_non_readonly_subcommand`で確認済み)。
+
+[確認できなかったこと・正直な注記として残る限界]
+- `diff_fraud.analyze_diff`の既存の限界(単純な行パターンマッチ、
+  偽陽性・偽陰性両方あり)をそのまま引き継ぐ。
+- `detect_compliance_trace`は既知の固定パス(`.parrhesia/`配下)のみを
+  確認し、対象リポジトリが異なる配置で同等の記録を持つ場合は検出できない。
+- 対象リポジトリのclone自体は本モジュールの責務外(呼び出し側が
+  clone済みのローカルパスを渡す前提)。
+
+検証: `tests/test_parrhesia_audit.py`(10件)。tmp_path配下に実際の
+gitリポジトリを`git init`して本物のコミット・diffを作り、モックや
+スタブを使わずに`audit_repository()`を実行して確認した(テスト削除を
+実際に実行するコミットを作り、`analyze_diff`が実際の差分からそれを
+検出することまで含む)。[署名についての正直な注記] このテストが
+`tmp_path`配下に作る使い捨てリポジトリへのコミットのみ、コマンドライン
+で`-c commit.gpgsign=false`を明示的に渡している(Pleroma本体の
+リポジトリ設定・グローバル設定には一切触れない、テスト専用の使い捨て
+データ生成に限定したスコープ — 詳細は`tests/test_parrhesia_audit.py`の
+モジュールdocstring参照)。Parrhesia全テストは206件→216件に増加し、
+全テストスイート実行で回帰ゼロを確認。
+
+### F章
+
+未着手(自己試験ハーネス)。
 
 ## 3. 制約の遵守状況
 
