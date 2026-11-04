@@ -2,7 +2,7 @@ import sys, os, socket, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_kernel_socket_transfer (Warden) - 検査用の被害ファイルと攻撃元ファイルを作り、そのパスを返す。"
+NAME = "guard_kernel_socket_transfer - 検査用の被害ファイルと攻撃元ファイルを作り、そのパスを返す。"
 
 # [新設 2026-10 §CD] 実際に発見した具体例: §CBでmmapによるバイパスを
 # 塞いだ直後、「os.write系4関数(os.write/os.pwrite/os.writev/

@@ -31,7 +31,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_required_ci_steps_present (Mechanic) - 本スクリプトの目的は「CIワークフローから必須の 天使ステップ(guard_sandbox_core_attack_battery.py等)が削除されていないか」を検知すること…"
+NAME = "check_required_ci_steps_present - 本スクリプトの目的は「CIワークフローから必須の 天使ステップ(guard_sandbox_core_attack_battery.py等)が削除されていないか」を検知すること…"
 
 # ワークフロー整合性ガード: CIワークフロー定義ファイル自体が存在し、
 # 必須ステップ（天使の呼び出し）が削除されていないかを検証する。

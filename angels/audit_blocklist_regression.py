@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_blocklist_regression (Cartographer) - 意味論的ドリフト検知: Gabrielの禁止モジュール/関数リストが、 既知のベースラインより弱体化（縮小）していないかを検証する。"
+NAME = "audit_blocklist_regression - 意味論的ドリフト検知: Gabrielの禁止モジュール/関数リストが、 既知のベースラインより弱体化（縮小）していないかを検証する。"
 
 
 # 意味論的ドリフト検知: Gabrielの禁止モジュール/関数リストが、

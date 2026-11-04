@@ -2,7 +2,7 @@ import sys, os, socket, ssl, threading, subprocess, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_socket_send_bypass (Sentinel) - テスト専用の自己署名証明書・秘密鍵を、openssl CLI経由でその場で 生成する(リポジトリの依存関係に`cryptography`…"
+NAME = "guard_socket_send_bypass - テスト専用の自己署名証明書・秘密鍵を、openssl CLI経由でその場で 生成する(リポジトリの依存関係に`cryptography`…"
 
 # [新設 2026-10 §CO] §CN(os.sendfileがaudit eventを発火しない件)の調査
 # 直後、同じ観点をプロセス起動・通信系の他のAPIにも体系的に広げて再確認

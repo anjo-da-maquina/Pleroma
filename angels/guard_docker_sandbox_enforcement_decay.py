@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_docker_sandbox_enforcement_decay (Sentinel) - 思考統制監査: 「Docker/OSレベルの強制サンドボックス化」が、静的検閲(1〜3層) を素通しするだけの張りぼてに戻されていないかを静的に検証する。"
+NAME = "guard_docker_sandbox_enforcement_decay - 思考統制監査: 「Docker/OSレベルの強制サンドボックス化」が、静的検閲(1〜3層) を素通しするだけの張りぼてに戻されていないかを静的に検証する。"
 
 
 # 思考統制監査: 「Docker/OSレベルの強制サンドボックス化」が、静的検閲(1〜3層)

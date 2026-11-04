@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_autorule_approval_gate (Scribe) - 思考統制監査: Armageddonエンジンの自動ルール更新が、必ず人間承認キュー (raziel_ledger_pending.json)を経由する実装に…"
+NAME = "audit_autorule_approval_gate - 思考統制監査: Armageddonエンジンの自動ルール更新が、必ず人間承認キュー (raziel_ledger_pending.json)を経由する実装に…"
 
 
 # 思考統制監査: Armageddonエンジンの自動ルール更新が、必ず人間承認キュー

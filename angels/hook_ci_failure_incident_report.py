@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_info, save_state, ROOT
 
-NAME = "hook_ci_failure_incident_report (Steward) - 失敗時専用フック: CI失敗・キャンセルの実インシデントを記録する。"
+NAME = "hook_ci_failure_incident_report - 失敗時専用フック: CI失敗・キャンセルの実インシデントを記録する。"
 
 # 失敗時専用フック: CI失敗・キャンセルの実インシデントを記録する。
 # 以前は演出のためのprintのみで、実際の記録は一切残していなかった。

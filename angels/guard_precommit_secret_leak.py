@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_precommit_secret_leak (Blademaster) - 機密情報漏洩カナリア: dummy_secrets(意図的ハニーポット)を除外し、 コミット対象に実際の秘密情報らしきパターンが紛れていないかを静的走査する。"
+NAME = "guard_precommit_secret_leak - 機密情報漏洩カナリア: dummy_secrets(意図的ハニーポット)を除外し、 コミット対象に実際の秘密情報らしきパターンが紛れていないかを静的走査する。"
 
 
 # 機密情報漏洩カナリア: dummy_secrets(意図的ハニーポット)を除外し、

@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_static_analysis_performance (Technician) - 非機能要件（負荷）監査: inquisition()の静的解析が、大きめの入力に対しても 妥当な時間内に完了することを検証する（性能劣化の回帰防止）。"
+NAME = "check_static_analysis_performance - 非機能要件（負荷）監査: inquisition()の静的解析が、大きめの入力に対しても 妥当な時間内に完了することを検証する（性能劣化の回帰防止）。"
 
 
 # 非機能要件（負荷）監査: inquisition()の静的解析が、大きめの入力に対しても

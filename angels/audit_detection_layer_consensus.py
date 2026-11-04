@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_detection_layer_consensus (Scribe) - マルチLLM異端検知（簡易版）: 単一LLM(Ollama)の判定のみに依存する設計になって いないか、すなわち危険判定が複数の独立した検査レイヤー…"
+NAME = "audit_detection_layer_consensus - マルチLLM異端検知（簡易版）: 単一LLM(Ollama)の判定のみに依存する設計になって いないか、すなわち危険判定が複数の独立した検査レイヤー…"
 
 
 # マルチLLM異端検知（簡易版）: 単一LLM(Ollama)の判定のみに依存する設計になって

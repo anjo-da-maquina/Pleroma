@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_signed_chain_integrity (Loremaster) - 状態遷移監査: 署名付き監査チェーン(audit_chain.jsonl)のハッシュ連鎖が 改ざんされていないことを検証する。"
+NAME = "audit_signed_chain_integrity - 状態遷移監査: 署名付き監査チェーン(audit_chain.jsonl)のハッシュ連鎖が 改ざんされていないことを検証する。"
 
 
 # 状態遷移監査: 署名付き監査チェーン(audit_chain.jsonl)のハッシュ連鎖が

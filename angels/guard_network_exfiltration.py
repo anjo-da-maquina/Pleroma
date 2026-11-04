@@ -2,7 +2,7 @@ import sys, os, socket
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_network_exfiltration (Vanguard) - 封鎖中にUDPのsendto()が正しく遮断されるかを確認する。"
+NAME = "guard_network_exfiltration - 封鎖中にUDPのsendto()が正しく遮断されるかを確認する。"
 
 # [新設 2026-10 §CA] 実際に発見した具体例: `maquina_gatekeeper.py`の
 # `ultimate_audit_hook`("深層保護"、`sys.addaudithook`ベースの唯一の

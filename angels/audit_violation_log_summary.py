@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_violation_log_summary (Loremaster) - 品質保持証跡一覧出力: これまでに記録された監査違反の件数・種別を集計し、 可読なマニフェストとして出力する。"
+NAME = "audit_violation_log_summary - 品質保持証跡一覧出力: これまでに記録された監査違反の件数・種別を集計し、 可読なマニフェストとして出力する。"
 
 
 # 品質保持証跡一覧出力: これまでに記録された監査違反の件数・種別を集計し、

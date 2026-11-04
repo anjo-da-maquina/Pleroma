@@ -23,7 +23,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_audit_log_rollback (Vanguard) - 増分監査: 監査チェーンの前回チェックポイントからの差分が正しく検知されることを検証する。"
+NAME = "guard_audit_log_rollback - 増分監査: 監査チェーンの前回チェックポイントからの差分が正しく検知されることを検証する。"
 
 
 # 証跡のブロックチェーン化（ロールバック検知）: 前回実行時に記録した

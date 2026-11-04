@@ -2,7 +2,7 @@ import sys, os, re, json, ctypes, socket, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_inconclusive, ROOT
 
-NAME = "guard_seccomp_syscall (Sentinel) - システムコール監査: seccomp-profile.jsonが必須システムコール群を引き続き拒否対象に含むことを検証する。"
+NAME = "guard_seccomp_syscall - システムコール監査: seccomp-profile.jsonが必須システムコール群を引き続き拒否対象に含むことを検証する。"
 
 # [新設 2026-10 §CG] §CFで導入したLinuxケーパビリティの剥奪は「root相当
 # の特権の有無」を制御するものだったが、§CD・§CEで繰り返し発見した

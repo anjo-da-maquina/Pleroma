@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_certificate_expiry (Mechanic) - 分散鍵管理・鍵更新監査: 証明書の有効期限が切れていないか、 および残り有効期間が閾値を下回っていないかを検証する。"
+NAME = "check_certificate_expiry - 分散鍵管理・鍵更新監査: 証明書の有効期限が切れていないか、 および残り有効期間が閾値を下回っていないかを検証する。"
 
 
 # 分散鍵管理・鍵更新監査: 証明書の有効期限が切れていないか、

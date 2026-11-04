@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_obfuscated_payload_bypass (Blademaster) - ペイロード防御監査: 難読化された攻撃パターンがGabriel(静的)かMichael(動的) のいずれかで必ず捕捉されることを検証する…"
+NAME = "guard_obfuscated_payload_bypass - ペイロード防御監査: 難読化された攻撃パターンがGabriel(静的)かMichael(動的) のいずれかで必ず捕捉されることを検証する…"
 
 
 # ペイロード防御監査: 難読化された攻撃パターンがGabriel(静的)かMichael(動的)

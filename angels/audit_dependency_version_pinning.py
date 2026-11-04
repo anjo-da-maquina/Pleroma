@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_dependency_version_pinning (Loremaster) - 依存関係監査: requirements.txt の全依存がバージョン固定(==)されているかを検証する (サプライチェーン攻撃対策の基本)。"
+NAME = "audit_dependency_version_pinning - 依存関係監査: requirements.txt の全依存がバージョン固定(==)されているかを検証する (サプライチェーン攻撃対策の基本)。"
 
 
 # 依存関係監査: requirements.txt の全依存がバージョン固定(==)されているかを検証する

@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_disk_and_log_capacity (Inspector) - 物理空間監査: ディスク空き容量と監査ログのサイズが許容範囲内であることを検証する。"
+NAME = "check_disk_and_log_capacity - 物理空間監査: ディスク空き容量と監査ログのサイズが許容範囲内であることを検証する。"
 
 
 # 物理空間監査: ディスク空き容量と監査ログのサイズが許容範囲内であることを検証する。

@@ -2,7 +2,7 @@ import sys, os, ast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_not_applicable, ROOT
 
-NAME = "check_log_flush_before_exit (Surveyor) - 静的解析監査: 関数本体最後の文がリスクのある呼び出しで終わっていないかを検証する。"
+NAME = "check_log_flush_before_exit - 静的解析監査: 関数本体最後の文がリスクのある呼び出しで終わっていないかを検証する。"
 
 # [新設 2026-10 §BR] §BQで、src/deadmans_switch.pyのCollarProtocol
 # ._commit_suicide()とsrc/starvation_protocol.pyのStarvationProtocol

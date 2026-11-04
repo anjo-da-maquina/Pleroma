@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_html_external_script_injection (Warden) - 外部リソース監査: HTML内で外部ホストから読み込まれる<script>タグを列挙し検証する。"
+NAME = "guard_html_external_script_injection - 外部リソース監査: HTML内で外部ホストから読み込まれる<script>タグを列挙し検証する。"
 
 import re as _re
 

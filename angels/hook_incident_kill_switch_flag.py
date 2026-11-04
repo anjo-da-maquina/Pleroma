@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_info, ROOT
 
-NAME = "hook_incident_kill_switch_flag (Courier) - 失敗時専用フック: 連座制キルスイッチ。"
+NAME = "hook_incident_kill_switch_flag - 失敗時専用フック: 連座制キルスイッチ。"
 
 # 失敗時専用フック: 連座制キルスイッチ。実際に外部接続を遮断する手段は
 # このCI環境には存在しないため、「遮断すべきだった」という事実を

@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "hook_test_suite_hash_log (Clerk) - 要件改ざん防止（コミットメント）: テストスイート(tests/)全体のハッシュを 記録し、前回実行時と比較して変更の有無を可視化する（タンパー・エビデンス）。"
+NAME = "hook_test_suite_hash_log - 要件改ざん防止（コミットメント）: テストスイート(tests/)全体のハッシュを 記録し、前回実行時と比較して変更の有無を可視化する（タンパー・エビデンス）。"
 
 
 # 要件改ざん防止（コミットメント）: テストスイート(tests/)全体のハッシュを

@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_log_format_integrity (Cartographer) - 監査証跡監査: 監査チェーンファイル自体の存在・可読性・JSONL形式の妥当性を検証する。"
+NAME = "audit_log_format_integrity - 監査証跡監査: 監査チェーンファイル自体の存在・可読性・JSONL形式の妥当性を検証する。"
 
 
 # 監査証跡監査: 監査チェーンファイル自体の存在・可読性・JSONL形式の妥当性を検証する。

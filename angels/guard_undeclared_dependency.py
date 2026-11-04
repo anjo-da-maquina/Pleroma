@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import yaml
 from _common import report_pass, report_fail, report_not_applicable, ROOT
 
-NAME = "guard_undeclared_dependency (Bulwark) - サプライチェーン監査: importされている全モジュールが許可リストの範囲内かを検証する。"
+NAME = "guard_undeclared_dependency - サプライチェーン監査: importされている全モジュールが許可リストの範囲内かを検証する。"
 
 # [新設 2026-10 §BV] §11.9フェーズE(未宣言の依存関係・サプライチェーン
 # 注入の検知)。requirements.txtは、本リポジトリが「依存関係の単一の正」

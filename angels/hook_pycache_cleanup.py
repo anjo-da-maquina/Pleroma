@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_info, ROOT
 
-NAME = "hook_pycache_cleanup (Clerk) - 終了処理監査: __pycache__ 等の一時生成物を確実に掃除する。"
+NAME = "hook_pycache_cleanup - 終了処理監査: __pycache__ 等の一時生成物を確実に掃除する。"
 
 # 終了処理: 以前はprintのみで実際の掃除は行っていなかった。
 # ここでは本セッション中に生成された一時キャッシュ(__pycache__)のみを

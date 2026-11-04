@@ -37,7 +37,7 @@ import subprocess
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_info, report_not_applicable, ROOT
 
-NAME = "audit_dependency_cve (Loremaster) - 依存関係監査: requirements.txt の各依存の固定バージョン自体に既知の脆弱性が無いかを検証する。"
+NAME = "audit_dependency_cve - 依存関係監査: requirements.txt の各依存の固定バージョン自体に既知の脆弱性が無いかを検証する。"
 
 REQUIREMENTS_PATH = ROOT / "requirements.txt"
 

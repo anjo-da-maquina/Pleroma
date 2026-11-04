@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_adapters_static_analysis (Loremaster) - 外部ツール監査: adapters/ 配下のスクリプトが禁止モジュールを 直接importしていないかをGabrielの静的解析で検証する。"
+NAME = "audit_adapters_static_analysis - 外部ツール監査: adapters/ 配下のスクリプトが禁止モジュールを 直接importしていないかをGabrielの静的解析で検証する。"
 
 
 # 外部ツール監査: adapters/ 配下のスクリプトが禁止モジュールを

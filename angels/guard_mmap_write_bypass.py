@@ -2,7 +2,7 @@ import sys, os, mmap, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_mmap_write_bypass (Blademaster) - 検査用の一時ファイルを作り、そのパスを返す。"
+NAME = "guard_mmap_write_bypass - 検査用の一時ファイルを作り、そのパスを返す。"
 
 # [新設 2026-10 §CB] 実際に発見した具体例: `sefer/__init__.py`の
 # `_michael_absolute_defense()`は、既に「fd事前オープンによる書き込み

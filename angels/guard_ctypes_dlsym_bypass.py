@@ -2,7 +2,7 @@ import sys, os, subprocess, tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_ctypes_dlsym_bypass (Sentinel) - 封鎖されている間、ctypes.pythonapiからのシンボル解決自体が 遮断され、ファイルが一切変更されないことを確認する。"
+NAME = "guard_ctypes_dlsym_bypass - 封鎖されている間、ctypes.pythonapiからのシンボル解決自体が 遮断され、ファイルが一切変更されないことを確認する。"
 
 # [新設 2026-10 §CE] 実際に発見した具体例: `maquina_gatekeeper.py`の
 # `ultimate_audit_hook`は、`event == "import" and args[0] in

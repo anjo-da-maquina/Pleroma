@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_zkp_audit_export_status (Inspector) - ZKP生成監査: zk_audit_trail.json から JUnit XML へのエクスポートが 正しく機能し、生成物が妥当なXMLであることを検証する。"
+NAME = "check_zkp_audit_export_status - ZKP生成監査: zk_audit_trail.json から JUnit XML へのエクスポートが 正しく機能し、生成物が妥当なXMLであることを検証する。"
 
 
 # ZKP生成監査: zk_audit_trail.json から JUnit XML へのエクスポートが

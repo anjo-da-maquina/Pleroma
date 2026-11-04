@@ -3,7 +3,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import yaml
 from _common import report_pass, report_fail, report_not_applicable, ROOT
 
-NAME = "check_ci_step_disabled (Surveyor) - `continue-on-error:`の値が(リテラルとして)真を表すかどうかを判定 する。"
+NAME = "check_ci_step_disabled - `continue-on-error:`の値が(リテラルとして)真を表すかどうかを判定 する。"
 
 # [新設 2026-10 §BU] §11.9フェーズD(監査システム自身への自己言及的な
 # 攻撃の一般化)。tests/test_angels_scripts_wired_into_ci.pyの既存の

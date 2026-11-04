@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_sandbox_shell_eval_bypass (Blademaster) - カオスエンジニアリング: 難読化攻撃の小規模バッテリーをSeferに対して実行し、 突破数をレポートする。"
+NAME = "guard_sandbox_shell_eval_bypass - カオスエンジニアリング: 難読化攻撃の小規模バッテリーをSeferに対して実行し、 突破数をレポートする。"
 
 
 # カオスエンジニアリング: 難読化攻撃の小規模バッテリーをSeferに対して実行し、

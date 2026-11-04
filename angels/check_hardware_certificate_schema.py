@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_hardware_certificate_schema (Mechanic) - ハードウェア証明監査: ataraxia_certificate.json の署名ペイロードに 必須フィールド(hardware_fingerprint等)…"
+NAME = "check_hardware_certificate_schema - ハードウェア証明監査: ataraxia_certificate.json の署名ペイロードに 必須フィールド(hardware_fingerprint等)…"
 
 
 # ハードウェア証明監査: ataraxia_certificate.json の署名ペイロードに

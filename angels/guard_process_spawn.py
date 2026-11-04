@@ -2,7 +2,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_process_spawn (Bulwark) - 封鎖中にos.fork()が正しく遮断されるかを確認する。"
+NAME = "guard_process_spawn - 封鎖中にos.fork()が正しく遮断されるかを確認する。"
 
 # [新設 2026-10 §CC] 実際に発見した具体例: `maquina_gatekeeper.py`の
 # `ultimate_audit_hook`("深層保護")は、新しいOSプロセスの生成を遮断

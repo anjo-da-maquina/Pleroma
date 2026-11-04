@@ -2,7 +2,7 @@ import sys, os, json, tempfile, shutil
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_audit_log_truncation (Sentinel) - sefer.audit_chain.SignedAuditChainを対象に、切り詰め攻撃後も 正しく検知できるかを確認する。"
+NAME = "guard_audit_log_truncation - sefer.audit_chain.SignedAuditChainを対象に、切り詰め攻撃後も 正しく検知できるかを確認する。"
 
 # [新設 2026-10 §BX] 実際に発見した具体例: `sefer/audit_chain.py`の
 # `SignedAuditChain.verify_integrity()`、および`maquina_gatekeeper.py`の

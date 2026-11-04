@@ -2,7 +2,7 @@ import sys, os, ast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_not_applicable, ROOT
 
-NAME = "guard_fail_open_exception (Blademaster) - 例外握り潰し検知: 無言のexcept:passのうち、正当性の自己開示コメントを伴わないものを検出する。"
+NAME = "guard_fail_open_exception - 例外握り潰し検知: 無言のexcept:passのうち、正当性の自己開示コメントを伴わないものを検出する。"
 
 # [新設 2026-10 §BS] maquina_gatekeeper.pyの_register_audit_hook_once()で
 # 実際に発見した本物の脆弱性――本リポジトリ唯一の深層保護

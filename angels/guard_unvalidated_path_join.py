@@ -2,7 +2,7 @@ import sys, os, ast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_not_applicable, ROOT
 
-NAME = "guard_unvalidated_path_join (Sentinel) - 静的解析監査: 関数内で未検証のパス結合(os.path.join等)が行われていないかを検証する。"
+NAME = "guard_unvalidated_path_join - 静的解析監査: 関数内で未検証のパス結合(os.path.join等)が行われていないかを検証する。"
 
 # [新設 2026-10 §BT] §11.9フェーズC(「検証した対象」と「実際に使用する
 # 対象」が食い違うパターン、いわゆるcheck-vs-use mismatch)の一般化。

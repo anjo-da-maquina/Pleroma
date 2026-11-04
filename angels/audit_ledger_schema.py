@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_ledger_schema (Cartographer) - スマートコントラクト監査: raziel_ledger.json のスキーマと、禁止イベント名が 妥当なPython audit event名の形式であるこ…"
+NAME = "audit_ledger_schema - スマートコントラクト監査: raziel_ledger.json のスキーマと、禁止イベント名が 妥当なPython audit event名の形式であるこ…"
 
 
 # スマートコントラクト監査: raziel_ledger.json のスキーマと、禁止イベント名が

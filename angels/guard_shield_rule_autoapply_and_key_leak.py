@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "guard_shield_rule_autoapply_and_key_leak (Warden) - 思考統制監査: src/angelic_shield.py / src/kamael_judgment.py の再構築が…"
+NAME = "guard_shield_rule_autoapply_and_key_leak - 思考統制監査: src/angelic_shield.py / src/kamael_judgment.py の再構築が…"
 
 # 思考統制監査: src/angelic_shield.py / src/kamael_judgment.py の再構築が、
 # 以下3点の修正を保ったままであることを静的に検証する。

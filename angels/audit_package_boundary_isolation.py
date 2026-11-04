@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "audit_package_boundary_isolation (Archivist) - 思考統制監査: 「ライセンス証明書機構(maquina_gatekeeper)の公開配布からの 分離」が将来静かに退行していないかを静的に検証する。"
+NAME = "audit_package_boundary_isolation - 思考統制監査: 「ライセンス証明書機構(maquina_gatekeeper)の公開配布からの 分離」が将来静かに退行していないかを静的に検証する。"
 
 
 # 思考統制監査: 「ライセンス証明書機構(maquina_gatekeeper)の公開配布からの

@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_source_syntax_validity (Surveyor) - 自動修復監査: sefer/*.py 全てが構文的に妥当(compileできる)ことを検証する。"
+NAME = "check_source_syntax_validity - 自動修復監査: sefer/*.py 全てが構文的に妥当(compileできる)ことを検証する。"
 
 
 # 自動修復監査: sefer/*.py 全てが構文的に妥当(compileできる)ことを検証する。

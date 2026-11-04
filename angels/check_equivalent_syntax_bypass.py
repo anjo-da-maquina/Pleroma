@@ -2,7 +2,7 @@ import sys, os, json
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "check_equivalent_syntax_bypass (Inspector) - 全検査器×全ペイロードの組み合わせを実行し、遮断できなかった 組み合わせの一覧を返す。"
+NAME = "check_equivalent_syntax_bypass - 全検査器×全ペイロードの組み合わせを実行し、遮断できなかった 組み合わせの一覧を返す。"
 
 # [新設 2026-10 §BW] §11.9フェーズF(ブロックリスト回避・等価構文迂回の
 # 一般化)。実際に発見した具体例: `anjo_interceptor/intent_checker.py`の

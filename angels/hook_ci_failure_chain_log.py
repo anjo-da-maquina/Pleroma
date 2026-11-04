@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_info, ROOT
 
-NAME = "hook_ci_failure_chain_log (Clerk) - 失敗時専用フック: インシデントの不変台帳への記録。"
+NAME = "hook_ci_failure_chain_log - 失敗時専用フック: インシデントの不変台帳への記録。"
 
 # 失敗時専用フック: インシデントの不変台帳への記録。実際の外部分散ストレージ
 # (IPFS/Arweave)への送信は本環境では行わず、ローカルの検証可能な

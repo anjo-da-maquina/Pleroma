@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, report_info, report_not_applicable, ROOT
 
-NAME = "audit_security_flag_test_coverage (Scribe) - 正常系監査: 環境変数ゲートが正しく機能し、誤検知も見落としもないことを検証する。"
+NAME = "audit_security_flag_test_coverage - 正常系監査: 環境変数ゲートが正しく機能し、誤検知も見落としもないことを検証する。"
 
 # [新設 2026-10 §BP] §BM(CHAOS_MODE)・§BN(HMAC連鎖)・§BP(check_certificate_expiry.py)の
 # 3件は、いずれも共通のパターンだった: 環境変数/フラグによって有効・無効が

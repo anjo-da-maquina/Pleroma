@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_audit_hook_active (Surveyor) - ランタイム監視監査: sys.addaudithook によるMichael's Swordが 実際に登録されていることを検証する…"
+NAME = "check_audit_hook_active - ランタイム監視監査: sys.addaudithook によるMichael's Swordが 実際に登録されていることを検証する…"
 
 
 # ランタイム監視監査: sys.addaudithook によるMichael's Swordが

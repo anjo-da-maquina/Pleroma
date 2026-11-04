@@ -2,7 +2,7 @@
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _common import report_pass, report_fail, ROOT
 
-NAME = "audit_agent_template_integration (Scribe) - 思考統制監査: src/openai_agent_loop.py (OpenAI拡張用テンプレート) が…"
+NAME = "audit_agent_template_integration - 思考統制監査: src/openai_agent_loop.py (OpenAI拡張用テンプレート) が…"
 
 # 思考統制監査: src/openai_agent_loop.py (OpenAI拡張用テンプレート) が、
 # 「拡張用の雛形」と称しながら防壁を一つも統合しない張りぼてに戻されて

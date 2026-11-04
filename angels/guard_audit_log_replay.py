@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_audit_log_replay (Warden) - リプレイ攻撃監視: 監査チェーン内に同一ハッシュ(=同一イベントの再生)が 重複していないかを検証する。"
+NAME = "guard_audit_log_replay - リプレイ攻撃監視: 監査チェーン内に同一ハッシュ(=同一イベントの再生)が 重複していないかを検証する。"
 
 
 # リプレイ攻撃監視: 監査チェーン内に同一ハッシュ(=同一イベントの再生)が

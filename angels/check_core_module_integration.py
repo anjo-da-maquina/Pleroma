@@ -6,7 +6,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "check_core_module_integration (Technician) - 機能要件E2E監査: 重要モジュール(sefer, anjo_interceptor)が正しくimportでき…"
+NAME = "check_core_module_integration - 機能要件E2E監査: 重要モジュール(sefer, anjo_interceptor)が正しくimportでき…"
 
 
 # 機能要件E2E監査: 重要モジュール(sefer, anjo_interceptor)が正しくimportでき、

@@ -7,7 +7,7 @@ from _common import (
     VALID_EVENT_NAME_RE, scan_for_leaked_secrets, ROOT,
 )
 
-NAME = "guard_hardcoded_secret_leak (Vanguard) - 機密情報漏洩監査: 環境変数経由を伴わない文脈でのシークレット文字列出現を検証する。"
+NAME = "guard_hardcoded_secret_leak - 機密情報漏洩監査: 環境変数経由を伴わない文脈でのシークレット文字列出現を検証する。"
 
 
 # メモリ暗号化監査（代替実装）: 実TEEは未接続のため、代わりに秘密情報が
